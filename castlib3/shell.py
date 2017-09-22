@@ -177,9 +177,14 @@ def invoke_util( name,
     if 'timeout' in kwargs.keys():
         popenKwArgs['timeout'] = kwargs['timeout']
     gLogger.debug( 'popenArgs=%r popenKwArgs=%r'%(popenArgs, popenKwArgs) )
-    p = TimeoutPopen( stdout=subprocess.PIPE,
+    p = None
+    try:
+        p = TimeoutPopen( stdout=subprocess.PIPE,
                       stderr=subprocess.PIPE,
                       *popenArgs, **popenKwArgs )
+    except OSError as e:
+        gLogger.exception(e)
+        gLogger.error( 'TimeoutPopen arguments: args=%r, kwargs=%r'%(popenArgs, popenKwArgs) )
     if popenDry:
         return
     stdoutStr, stderrStr = '', ''

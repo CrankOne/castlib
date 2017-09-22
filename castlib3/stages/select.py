@@ -94,7 +94,7 @@ def _missing_compare( refLoc, dstLoc, **kwargs ):
     return DB.session.query( File, DstFile ) \
                      .filter_by( parent=refLoc ) \
                      .outerjoin( DstFile, DstFile.name == File.name ) \
-                     .filter( DstFile.id == None )
+                     .filter( DstFile.id == None ).order_by( File.modified )
 
 def _deleted_compare( refLoc, dstLoc, **kwargs ):
     sqRef = DB.session.query(File) \

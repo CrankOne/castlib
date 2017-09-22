@@ -1,0 +1,13 @@
+Metadata-Version: 1.0
+Name: castlib3
+Version: 0.3
+Summary: Automated synchronization of filesystem entries among various locations.
+Home-page: https://github.com/CrankOne/castlib
+Author: Renat R. Dusaev
+Author-email: crank@qcrypt.org
+License: UNKNOWN
+Description: The package is designed for automated synchronization of medium-scale data
+        among multiple storaging filesystem-like back-ends in a recursive manner with
+        clear and highly configurable behaviour.
+        
+Platform: UNKNOWN

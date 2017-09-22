@@ -19,6 +19,10 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from distutils.core import setup
+from pip.req import parse_requirements
+
+install_reqs = parse_requirements('requirements.txt')
+reqs = [str(ir.req) for ir in install_reqs]
 
 setup(name = "castlib3",
     version = "0.3",
@@ -32,6 +36,7 @@ setup(name = "castlib3",
             'castlib3.sVbp' : 'sVbp',
             'castlib3' : 'castlib3' },
     scripts = ['cstl3-run'],
+    install_requires=reqs,
     long_description = """\
 The package is designed for automated synchronization of medium-scale data
 among multiple storaging filesystem-like back-ends in a recursive manner with
