@@ -1,0 +1,239 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2017 Renat R. Dusaev <crank@qcrypt.org>
+# Author: Renat R. Dusaev <crank@qcrypt.org>
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+from __future__ import print_function
+
+from flask import Blueprint, render_template, request, make_response, jsonify
+from flask_api import status
+#from flask_socketio import emit
+from werkzeug.exceptions import BadRequest
+from sVresources.AJAX_dynDict import out_dict
+from sVresources.ViewRestrictions import ViewRestrictions
+from sVresources import get_app
+from castlib2.chunk import Chunk, ChunkEncoder
+from castlib2.logs import gLogger
+from sVresources.utils.dtFrmParser import jQDT_form2dict
+from sqlalchemy import and_
+import json, traceback, zlib, pickle, os, re, yaml
+import castlib2.db
+
+bp = Blueprint('cstl2', __name__,
+               template_folder='templates',
+               static_folder='static',
+               url_prefix='/rawstat')
+
+availableTasks = {}
+
+def configure( tasksCatalogue=None ):
+    # "presets.build/configs/etc.development/cstl2-tasks"
+    if tasksCatalogue is not None:
+        gLogger.info( "\"tasksCatalogue\" is set to \"%s\""%tasksCatalogue )
+        tasksFiles = [f for f in os.listdir(tasksCatalogue) \
+                                if os.path.isfile(os.path.join(tasksCatalogue, f))]
+        for taskFile in tasksFiles:
+            if re.match( "^.+\.yml$", taskFile ):
+                taskName = taskFile[:-4]
+                fullPath = os.path.join(tasksCatalogue, taskFile)
+                availableTasks[taskName] = fullPath
+    else:
+        gLogger.warning( "No \"tasksCatalogue\" parameter is given." )
+
+def run_task( taskName ):
+    from sV_celery import cstl2_operation
+    filePath = availableTasks[taskName]
+    with open( filePath ) as f:
+        c = yaml.load(f)
+    return cstl2_operation.apply_async(
+                args=[c,],
+                kwargs= {
+                    'dbCfgStr' : json.dumps( {'databaseArgs':  get_app().dbCfgPos,
+                                              'databaseKwArgs':get_app().dbCfg })
+                } )
+
+@bp.route('/operations-queue/', methods=['GET'])
+def cstl2d_ops_queue():
+    # see https://github.com/dgouldin/celery-websocket-events
+    return render_template( 'pages/operations-queue.html' )
+
+# 202 --- Accepted?
+@bp.route('/tst_initialize_operation/', methods=['GET'])
+def operation():
+    #task = cstl2_operation.apply_async( args=['testing',] )
+    taskID = run_task('index_chunks')
+    #print(taskID)
+    return jsonify({'taskID':'%s'%taskID})  # , 202, {'Location': url_for('taskstatus',
+                        #   task_id=task.id)}
+
+@bp.route('/observe/', methods=['GET'])
+def observe_chunks():
+    return render_template( 'pages/observe-chunks.html',
+            chunkEntryFields=Chunk.topology)
+
+# TODO: per-run detailed view to see total number of chunks/spills/events/etc.
+# TODO: per-chunk detailed view to see total number of spills/events/etc.
+
+@bp.route('/observe/chunks/', methods=['POST'])
+@ViewRestrictions(jOutRq=True)
+def ajax_dynload_chunk_details():
+    """
+    Expects incoming POST form data assembled with protocol referred here:
+    https://datatables.net/manual/server-side
+    (the returning data format is also described).
+    """
+    try:
+        if not request.form:
+            raise BadRequest(description="Request didn't bear any form data "
+                        "or data is invalid." )
+        out_dict()['data'] = []
+        pars = jQDT_form2dict(request.form.to_dict(), listsAsDict=False)
+        #print( json.dumps(pars, indent=4, sort_keys=True) ) # XXX
+        from_       = int(pars['start'])
+        nEntries    = int(pars['length'])
+        sortBy      = []  # request.form['order']
+        out_dict()['draw'] = int(pars['draw'])
+        for sortColumnPars in pars['order']:
+            key = Chunk.topology.keys()[int(sortColumnPars['column'])]
+            field = getattr(Chunk, '_' + key, None)
+            if field and 'desc' == sortColumnPars['dir']:
+                field = field.desc()
+            sortBy.append( field )
+        if nEntries > 100:
+            raise Exception(
+                    'Specified too much entries to show (%d > 100).'%nEntries)
+        out_dict()['recordsTotal'] = castlib2.db.gSession.query(Chunk).count()
+        out_dict()['recordsFiltered'] = out_dict()['recordsTotal'] # << TODO!
+        q = castlib2.db.gSession.query(Chunk)
+        #results = q.order_by(*sortBy).slice(from_, nEntries)
+        results = q.order_by(*sortBy).offset(from_).limit(nEntries)
+        out_dict()['data'] = []
+        ce = ChunkEncoder()
+        for c in results:
+            cd = ce.default( c )
+            out_dict()['data'].append( cd )
+        #print( json.dumps(out_dict(), indent=4, sort_keys=True) )
+    except Exception as e:
+        out_dict()['error'] = 'Server error.'
+        gLogger.exception( 'During processing AJAX request within '
+            'ajax_dynload_chunk_details() an exception occured:' )
+    return out_dict().j()
+
+#@bp.route('/rawstat/event-no/<>')
+
+# TODO: equivalent human-readable form data/event/runNo-spillNo-evInSpillNo.dat
+# TODO: return 102 --- Processing, when chunk needs to be indexed:
+@bp.route('/data/event/<regex("[0-9a-fA-F]+"):hexStrEID>/', methods=['GET'])
+def ajax_dynload_event( hexStrEID=None ):
+    try:
+        import afNA64.DataSources
+    except ImportError:
+        return make_response( '<p>Unable to load afNA64.DataSources '
+                                                        'python bindings.</p>',
+                              status.HTTP_503_SERVICE_UNAVAILABLE,  # 510?
+                              {'Content-Type' : 'text/html'} )
+    eid = afNA64.DataSources.NA64_UEventID()
+    afNA64.DataSources.hex_str2eid( str(hexStrEID), eid )
+    chunkEntry = None
+    q = castlib2.db.gSession.query(Chunk)
+    if eid.chunklessLayout.hasChunkNo:
+        # ... TODO
+        return make_response( 'Querying with known chunk number is not yet implemented.',
+                              status.HTTP_501_NOT_IMPLEMENTED,
+                              {'Content-Type' : 'text/plain'} )
+    else:
+        chunks = q.filter(
+                and_( Chunk._runno==eid.chunklessLayout.runNo,
+                      Chunk.spills.any(spillno=eid.chunklessLayout.spillNo)) )
+        if chunks.count() != 1:
+            # The chunk pointed out by provided EventID not found. Explain the
+            # reason:
+            reason = ''
+            if 1 < chunks.count():
+                return make_response(
+                    'Ambiguous data revealed: run#%d/spill#%d found %d entries!'%(
+                                                eid.chunklessLayout.runNo,
+                                                eid.chunklessLayout.spillNo,
+                                                chunks.count() ),
+                              status.HTTP_500_INTERNAL_SERVER_ERROR,
+                              {'Content-Type' : 'text/plain'} )
+            elif 0 == castlib2.db.gSession.query(Chunk) \
+                    .filter( Chunk._runno==eid.chunklessLayout.runNo ) \
+                    .count():
+                reason = 'run number unknown.'
+            else:
+                reason = 'spill is not indexed or does not exist.'
+            return make_response(
+                        'No indexed chunk found for run#%d/spill#%d: %s'%(
+                                                eid.chunklessLayout.runNo,
+                                                eid.chunklessLayout.spillNo,
+                                                reason ),
+                              status.HTTP_404_NOT_FOUND,
+                              {'Content-Type' : 'text/plain'} )
+        chunkEntry = chunks.first()
+    cmprdSeries = chunkEntry.get('indices', noexcept=True,
+                                            reacquire=False )
+    if not cmprdSeries:
+        # TODO: consider the `force indexing' case with delayed response
+        return make_response(
+                        'Chunk %d in run %d is not yet indexed. Unable '
+                        'to retreive event.'%( chunk.chunkno,
+                                               eid.chunklessLayout.runNo),
+                              status.HTTP_404_NOT_FOUND,
+                              {'Content-Type' : 'text/plain'} )
+    metadataIndices = pickle.loads(zlib.decompress( cmprdSeries ))
+    locations = chunkEntry.get_possible_locations()
+    path = None
+    for loc in locations:
+        if os.path.isfile( loc ):
+            path = loc
+            break
+    if not path:
+        return make_response(
+                        'Chunk %d in run %d is not available. Unable '
+                        'to retreive event.'%( chunk.chunkno,
+                                               eid.chunklessLayout.runNo),
+                              status.HTTP_404_NOT_FOUND,
+                              {'Content-Type' : 'text/plain'} )
+    rawEvBytes = afNA64.DataSources.read_one_new_raw_event(
+                                path.encode('utf-8'), metadataIndices, eid )
+    #print( "Sending %d bytes: %x %x %x..."%(
+    #            len(rawEvBytes), int(rawEvBytes[0:4]),
+    #                             int(rawEvBytes[4:8]),
+    #                             int(rawEvBytes[8:12])))
+    return make_response( rawEvBytes,
+                          status.HTTP_200_OK,
+                          {'Content-Type' : 'application/octet-stream'} )
+    #return make_response( '<p>At the bleeding edge.</p>',
+    #                          status.HTTP_501_NOT_IMPLEMENTED,
+    #                          {'Content-Type' : 'text/html'} )
+
+#@socketio.on('cstl2celeryWorkerUpdated')       # Decorator to catch an event called "my event":
+def ws_emit_cstl2_worker_update(newData):       # test_message() is the event callback function.
+    emit('newDat', {'data': newData})           # Trigger a new event called "my response" 
+                                                # that can be caught by another callback later in the program.
+
+sVresources_WSEvents = {
+    'cstl2celeryWorkerUpdated' : [ws_emit_cstl2_worker_update, '/rawstat'],
+}
+
+#socketio.on_event('my event', my_function_handler, namespace='/test')
+
+sVresources_Blueprint = bp
+

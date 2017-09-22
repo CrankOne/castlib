@@ -1,0 +1,150 @@
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+# Copyright (c) 2016 Renat R. Dusaev <crank@qcrypt.org>
+# Author: Renat R. Dusaev <crank@qcrypt.org>
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+from __future__ import print_function
+
+import sys, ctypes
+reload(sys)
+sys.setdefaultencoding('UTF8')
+
+import argparse, yaml, os, pprint
+from urlparse import urlparse
+
+from castlib3.stage import Stages
+from castlib3.filesystem import discover_entries
+from castlib3.logs import gLogger
+from castlib3.backend import LocalBackend
+from castlib3.castor.backend import CASTORBackend
+from castlib3.exec_utils import initialize_database, \
+                                ordered_load, \
+                                discover_locations, \
+                                initialize_backends
+# this will cause automatic discovering all castlib3 stages:
+import castlib3.stages
+from castlib3.syscfg import import_config, gConfig
+
+# Standalone run snippet for NA64 superproject:
+# $ sources/castlib2/cstl3-run \
+#                --db-conf presets.build/configs/db.yml \
+#                --stages presets.build/configs/cstl3-tasks/cstl3-spec.yml \
+#                --local-path presets.build/byHosts/$(hostname)/cstl3.yml 
+
+if '__main__' == __name__:
+    p = argparse.ArgumentParser(description="""
+    Executable script performing staged routine provided by castlib3 package.
+    """)
+    p.add_argument('-c', '--configuration',
+                type=str,
+                required=True,
+                help="Major configuration file (YAML document expected)." )
+    p.add_argument('--locations',
+                type=str,
+                help="This argument has to be " \
+                "a YAML-file claiming a mapping between local path(s) and " \
+                "virtual database's path(s)." )
+    p.add_argument('--mode',
+                type=str, default='common',
+                help="Presets mode name. Corresponds to certain section in " \
+                "configs (common/development/production/etc).")
+    p.add_argument('-l', '--loglevel',
+                default='info',
+                help="Log level with which to run castlib3 routines. Allowed " \
+                "values are: debug, info, warning, error.")
+    p.add_argument('--no-commit',
+                action='store_true',
+                help="When given no database changes will be actually " \
+                "commited. This is a development command helping one to " \
+                "check what changes are going to happen. May break the " \
+                "staging sequence.")
+    p.add_argument('--preload-lib',
+                action='append',
+                help="Preload a shared library within process context. Useful "\
+                "when running in ancient environments with userspace build.")
+    actionG = p.add_mutually_exclusive_group(required=True)
+    actionG.add_argument('--list-stages', action='store_true',
+                help="Will print available stages and terminate the script.")
+    actionG.add_argument('--dry', action='store_true',
+                help="Will print directories to index and terminate the script. " \
+                "Useful for wildcards inspection.")
+    actionG.add_argument('--stages',
+                type=argparse.FileType('r'),
+                help="Task to be performed. Ususally expressed as sequence of " \
+                "stages written in YAML file." )
+    args = p.parse_args()
+
+    import_config( args.configuration, mode=args.mode )
+
+    if args.list_stages:
+        for className, classT in castlib3.stage.gCastlibStages.iteritems():
+            print( " * %s%s"%( className, classT.stageDescription ) )
+        sys.exit(0)
+
+    backends = initialize_backends( gConfig['backends'].keys()
+                                  , gConfig['backends'] )  # ...
+
+    for pl in args.preload_lib or []:
+        ctypes.cdll.LoadLibrary(pl)
+
+    # Set-up the directory paths.
+    directories = {}
+    
+    if args.locations:
+        directories = discover_locations( args.locations )
+
+    # Discover filesystem entries in database, and obtain files list applying
+    # wildcards.
+    if directories:
+        directories = discover_entries( directories, backends=backends )
+
+    # For dry run, just print the content to be indexed and that's it.
+    if args.dry:
+        pp = pprint.PrettyPrinter(indent=4)
+        pp.pprint( directories )
+        sys.exit(0)
+
+    # Explicitly initialize database, if database config was provided:
+    dbConf = gConfig
+    initialize_database( gConfig['database'].pop('\\args'),
+                         engineCreateKWargs=gConfig['database'] )
+
+    # Parse stages list:
+    with args.stages as f:
+        stages = ordered_load(f)
+
+    externalModules = stages.get('external-import', None)
+    if externalModules:
+        ms = map(__import__, externalModules)
+
+    stages = Stages( stages['stages'] )
+
+    if directories:
+        # Process directories:
+        for directory in directories:
+            gLogger.info("On \"%s\" -> \"%s\" dir:"%(
+                directory['folder'], directory['folder'] ))
+            stages( directory=directory, noCommit=args.no_commit, backends=backends )
+    else:
+        # If no directories given, run the pipeline once without the directory
+        # parameter
+        stages( noCommit=args.no_commit, backends=backends )
+
+# vim: filetype=python

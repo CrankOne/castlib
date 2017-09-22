@@ -1,0 +1,7 @@
+futures==3.0.3
+six>=1.9.0
+sqlalchemy
+pyyaml
+beautifulsoup4
+sqlamp
+progress
