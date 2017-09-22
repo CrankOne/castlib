@@ -102,7 +102,7 @@ class HTTPPostSend( Stage ):
     # nstages=1, stageNum=1, results=[]
     def _V_call( self
                 , maxEntriesPerRequest=300  # max entries to send per one request
-                , address='http://0.0.0.0:5000/na64-mdat/import/files'
+                , address='http://0.0.0.0:5000/import/files'
             ):
         rootF = DB.session.query(Folder).filter(Folder.parentID==None).first()
         if not rootF:

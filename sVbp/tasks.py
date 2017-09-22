@@ -22,7 +22,7 @@
 from __future__ import print_function
 
 """
-This module contains Celery tasks that afNA64 package may invoke to perform
+This module contains Celery tasks that sV-resources package may invoke to perform
 delayed operation. This routines are predominantly used by sV-resources server.
 """
 

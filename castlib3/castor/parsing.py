@@ -62,9 +62,6 @@ rxsNSLS = rxsNSLSFileClass      \
         + r'(?P<filename>.+)$'
 rxNSLS = re.compile( rxsNSLS, re.M )
 
-# XXX, moved to afNA64/py/resources/parsing.py
-#runsListHTMLPage_timedateFmt = '%Y-%m-%d %H:%M:%S'
-
 rxsStagerQueryError = r'(?:Error\s+(?P<errorCode>\d+))\/(?P<errorMessage>.+)'
 rxStagerQueryError = re.compile( rxsStagerQueryError )
 

@@ -22,10 +22,10 @@ from distutils.core import setup
 
 setup(name = "castlib3",
     version = "0.3",
-    description = "A toolset for file synchronization with CASTOR storage.",
+    description = "Automated synchronization of filesystem entries among various locations.",
     author = "Renat R. Dusaev",
-    author_email = "renat.dusaev@cern.ch",
-    url = "https://gitlab.cern.ch/P348/aux.scripts",
+    author_email = "crank@qcrypt.org",
+    url = "https://github.com/CrankOne/castlib",
     packages = [ 'castlib3.sVbp',
                  'castlib3'],
     package_dir = {
@@ -33,8 +33,7 @@ setup(name = "castlib3",
             'castlib3' : 'castlib3' },
     scripts = ['cstl3-run'],
     long_description = """\
-The castlib3 package is a set of tools designed for file synchronization with
-CERN's CASTOR storage. Toolkit was designed for needs of NA64 experiment.
-
-The database and chunk file ORM can be further used for front-end applications.\
+The package is designed for automated synchronization of medium-scale data
+among multiple storaging filesystem-like back-ends in a recursive manner with
+clear and highly configurable behaviour.
 """)
