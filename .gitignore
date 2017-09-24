@@ -25,5 +25,5 @@ a.out.*
 CMakeCache.txt
 CMakeFiles
 **/Linux/*
-catslib3.egg-info/*
+castlib3.egg-info/*
 venv/*
