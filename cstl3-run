@@ -22,11 +22,11 @@
 
 from __future__ import print_function
 
-import sys, ctypes
+import sys, ctypes, imp
 reload(sys)
 sys.setdefaultencoding('UTF8')
 
-import argparse, yaml, os, pprint
+import argparse, yaml, os, pprint, importlib
 from urlparse import urlparse
 
 from castlib3.stage import Stages
@@ -48,6 +48,8 @@ from castlib3.syscfg import import_config, gConfig
 #                --stages presets.build/configs/cstl3-tasks/cstl3-spec.yml \
 #                --local-path presets.build/byHosts/$(hostname)/cstl3.yml 
 
+gExtModules = {}
+
 if '__main__' == __name__:
     p = argparse.ArgumentParser(description="""
     Executable script performing staged routine provided by castlib3 package.
@@ -65,7 +67,7 @@ if '__main__' == __name__:
                 type=str, default='common',
                 help="Presets mode name. Corresponds to certain section in " \
                 "configs (common/development/production/etc).")
-    p.add_argument('-l', '--loglevel',
+    p.add_argument('-L', '--loglevel',  # TODO: use it!
                 default='info',
                 help="Log level with which to run castlib3 routines. Allowed " \
                 "values are: debug, info, warning, error.")
@@ -75,10 +77,15 @@ if '__main__' == __name__:
                 "commited. This is a development command helping one to " \
                 "check what changes are going to happen. May break the " \
                 "staging sequence.")
-    p.add_argument('--preload-lib',
+    p.add_argument('-p','--preload-lib',
                 action='append',
                 help="Preload a shared library within process context. Useful "\
                 "when running in ancient environments with userspace build.")
+    p.add_argument('--load-module',
+                action='append',
+                help="Load a castlib3 module after initial infrastructure "\
+                "will be initialized. Use this for customizing stages set "\
+                "with custom modules.")
     actionG = p.add_mutually_exclusive_group(required=True)
     actionG.add_argument('--list-stages', action='store_true',
                 help="Will print available stages and terminate the script.")
@@ -103,6 +110,27 @@ if '__main__' == __name__:
 
     for pl in args.preload_lib or []:
         ctypes.cdll.LoadLibrary(pl)
+
+    for m in args.load_module or []:
+        if m.endswith('.py'):
+            # This is a path:
+            vPath = os.path.split(m)[1]
+            vPath = 'castlib3.stages.%s'%os.path.splitext(vPath)[0]
+            vPath = str.replace(vPath, '-', '_')
+            if vPath not in gExtModules.keys():
+                gLogger.info('Loading python source %s as module %s...'%(
+                    m, vPath))
+                imp.load_source(vPath, m)
+                gExtModules[vPath] = m
+            else:
+                gLogger.warning('Omitting repeatative import of %s.'%vPath)
+        else:
+            # import module
+            if m not in gExtModules.keys():
+                gLogger.info('Loading python module %s...'%(m))
+                gExtModules[m] = importlib.import_module(m, package='castlib3')
+            else:
+                gLogger.warning('Omitting repeatative import of %s.'%m)
 
     # Set-up the directory paths.
     directories = {}
@@ -132,7 +160,10 @@ if '__main__' == __name__:
 
     externalModules = stages.get('external-import', None)
     if externalModules:
+        gLogger.info('Loading %d external import...'%len(externalModules))
         ms = map(__import__, externalModules)
+
+    gLogger.debug('Initializeing stages pipeline...')
 
     stages = Stages( stages['stages'] )
 

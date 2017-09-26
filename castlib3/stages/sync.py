@@ -59,6 +59,7 @@ class Sync( Stage ):
                 , truncateSeconds=False
                 , extractChecksumOnUpload=True
                 , validateChecksum=True
+                , allowNULL=False
             ):
         if not results:
             raise RuntimeError('The Select stage instance has to find out the '
@@ -91,6 +92,7 @@ class Sync( Stage ):
                                                    , truncateSeconds=truncateSeconds
                                                    , extractChecksumOnUpload=extractChecksumOnUpload
                                                    , commitEvery=commitEvery
+                                                   , allowNULL=allowNULL
                                                    , validateChecksum=validateChecksum )
 
     def sync_modified( self
@@ -99,22 +101,25 @@ class Sync( Stage ):
                      , commitEvery=0
                      , truncateSeconds=False
                      , extractChecksumOnUpload=True
-                     , validateChecksum=True ):
+                     , validateChecksum=True
+                     , allowNULL=False ):
+        n, nMax = 0, mismatchQuery.count()
         bar = progress.bar.Bar( 'syncing modified timestamps'
-                    , max=mismatchQuery.count()
+                    , max=nMax
                     , suffix='%(index)d/%(max)d, %(eta)ds remains' )
         for entry in mismatchQuery:
+            n += 1
             trgF = entry[0]
             refF = entry[1]
+            if refF.modified is None and not allowNULL:
+                bar.next()
+                gLogger.warning('Skipping %s since reference timestamp is NULL.'%(trgURI) )
+                continue
             trgURI = trgF.get_uri()
             trgLPP = urlparse(trgURI)
             gLogger.debug( 'Setting the date of %s from %r to %r according to %r.'%(
                     trgURI, trgF.modified, trgF.modified, refF.get_uri() ) )
-            backend = None
-            if '' == trgLPP.scheme or 'file' == trgLPP.scheme:
-                backend = backends['file']
-            elif 'castor' == trgLPP.scheme:
-                backend = backends[trgLPP.scheme]
+            backend = backends[trgLPP.scheme or 'file']
             backend.set_modified( trgURI, refF.modified )
             newTs = backend.get_modified( trgURI )
             refTs = refF.modified
@@ -127,9 +132,8 @@ class Sync( Stage ):
             trgF.modified = newTs
             DB.session.add(trgF)
             if commitEvery and 0 == n%commitEvery:
-                self.commit()
+                DB.session.commit()
             bar.next()
-            # TODO: commitEvery
         bar.finish()
 
     def sync_size( self
@@ -138,6 +142,7 @@ class Sync( Stage ):
                  , commitEvery=0
                  , truncateSeconds=False
                  , extractChecksumOnUpload=True
+                 , allowNULL=False  # unused (todo?)
                  , validateChecksum=True ):
         #bar = progress.bar.Bar( 're-uploading files with mismatched size'
         #            , max=mismatchQuery.count()
@@ -161,7 +166,7 @@ class Sync( Stage ):
             newSize = trgBackend.get_size( trgURI )
             if newTs != refF.modified:
                 if not truncateSeconds \
-                    or not newTs.replace(second=0, microsecond=0) \
+                    and not newTs.replace(second=0, microsecond=0) \
                         == refF.modified.replace(second=0, microsecond=0):
                     gLogger.warning('Modified timestamp verification failed. Referential: %r, '
                         'real: %r'%( refF.modified, newTs ) )
@@ -172,7 +177,7 @@ class Sync( Stage ):
             trgF.size = newSize
             DB.session.add( trgF )
             if commitEvery and 0 == n%commitEvery:
-                self.commit()
+                DB.session.commit()
             #bar.next()
         #bar.finish()
 
@@ -182,6 +187,7 @@ class Sync( Stage ):
                     , commitEvery=0
                     , truncateSeconds=False
                     , extractChecksumOnUpload=True
+                    , allowNULL=False  # pointless
                     , validateChecksum=True ):
         n, nMax = 0, mismatchQuery.count()
         if nMax > 1e6:
@@ -191,7 +197,8 @@ class Sync( Stage ):
             n += 1
             srcF = entry[0]
             assert( entry[1] is None )  # Has be size mismatch.
-            srcURI, dstURI = srcF.get_uri(), os.path.join(dstLoc.get_uri(), srcF.name)
+            filename = srcF.name
+            srcURI, dstURI = srcF.get_uri(), os.path.join(dstLoc.get_uri(), filename)
             srcLPP = urlparse(srcURI)
             dstLPP = urlparse(dstURI)
             # Upload:
@@ -203,21 +210,23 @@ class Sync( Stage ):
                 srcF.adler32 = a32
                 DB.session.add( srcF )
             dstBackend = backends[dstLPP.scheme or 'file']
-            dstF = dstBackend.new_file( srcF.name
+            dstF = dstBackend.new_file( dstURI
+                                      , name=srcF.name
                                       , parent=dstLoc
                                       , size=srcF.size
                                       , adler32=a32
                                       , modified=srcF.modified )
-            gLogger.info( 'Uploading \033[1m%d/%d\033[0m : %s (size=%d) to location %s.'%(
+            gLogger.info( 'Uploading \033[1m%d/%d\033[0m : %s (size=%d) to location %s (adler32=%s, size=%d).'%(
                     n, nMax,
-                    srcURI, srcF.size, dstURI ) )
+                    srcURI, srcF.size, dstURI,
+                    a32 or '<unknown>', srcF.size ) )
             dstBackend.cpy_file( srcURI, dstURI, backends=backends )
             dstBackend.set_modified( srcURI, srcF.modified )
             newTs = dstBackend.get_modified( dstURI )
             newSize = dstBackend.get_size( dstURI )
             if newTs != srcF.modified:
                 if not truncateSeconds \
-                    or not newTs.replace(second=0, microsecond=0) \
+                    and not newTs.replace(second=0, microsecond=0) \
                         == srcF.modified.replace(second=0, microsecond=0):
                     gLogger.warning('Modified timestamp verification failed. Referential: %r, '
                         'real: %r'%( srcF.modified, newTs ) )
@@ -227,5 +236,11 @@ class Sync( Stage ):
                         'real: %d'%( srcF.size, newSize ) )
             dstF.size = newSize
             dstF.modified = newTs
+            assert(dstF.name)
+            assert(srcF.name)
             DB.session.add(dstF)
+            DB.session.add(srcF)
+            if commitEvery and 0 == n%commitEvery:
+                DB.session.commit()
+                gLogger.info('Interim changes committed to DB.')
 

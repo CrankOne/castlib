@@ -70,7 +70,7 @@ def _modified_compare( refLoc, dstLoc, **kwargs ):
                     .filter_by( parent=dstLoc ) \
                     .join( RefFile,
                            and_( RefFile.name    == File.name
-                               , RefFile.modified != File.modified ) )
+                               , RefFile.modified != File.modified ) ).order_by( RefFile.modified )
     else:
         # NOTE: the unix_timestamp() is defined only for MySQL. We have to
         # invoke bare SQL here to filter by time difference.
@@ -80,7 +80,8 @@ def _modified_compare( refLoc, dstLoc, **kwargs ):
                     .filter_by( parent=dstLoc ) \
                     .join( RefFile,
                            and_( RefFile.name    == File.name \
-        , func.abs( RefFile.modified - File.modified ) >= 1 ) )
+        , or_( RefFile.modified - File.modified >= 1
+             , RefFile.modified - File.modified <= 1 ) ) )
 
 def _missing_compare( refLoc, dstLoc, **kwargs ):
     #q = DB.session.query( File.id, RefFile.id ) \

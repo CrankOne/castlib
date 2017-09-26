@@ -25,7 +25,7 @@ from __future__ import print_function
 File containing logging configuration for castlib2.
 """
 
-import logging
+import logging, os
 
 # create logger
 gLogger = logging.getLogger('castlib2')
@@ -33,7 +33,10 @@ gLogger.setLevel( logging.DEBUG )
 
 # create console handler and set level to debug
 sh = logging.StreamHandler()
-sh.setLevel(logging.INFO)
+if 'DEBUG' in os.environ.keys() and int(os.environ['DEBUG']):
+    sh.setLevel( logging.DEBUG )
+else:
+    sh.setLevel( logging.INFO )
 formatter = logging.Formatter('%(name)s/%(levelname)s: %(message)s')
 sh.setFormatter(formatter)
 

@@ -19,13 +19,16 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import os
+
 from castlib3.stage import Stage, StageMetaclass
 from castlib3.models.filesystem import Folder, File, RemoteFolder, StoragingNode, FSEntry
 from castlib3.logs import gLogger
 from castlib3.backend import LocalBackend
 from castlib3 import dbShim as DB
 
-from sqlalchemy import exists, and_
+from sqlalchemy import exists, and_, not_
+from sqlalchemy.orm.exc import MultipleResultsFound
 from os import path as P
 from urlparse import urlparse
 
@@ -109,10 +112,21 @@ def index_directory( dirEntry, backend
     folderCreated = False
     if node is None:
         # We're indexing local or not a first-level "folder" relatively to
-        # node. Use ordinary folder entry.
-        folderEntry = DB.session.query(Folder).filter(
-                      Folder.name == dirName \
-                    , Folder.parent == parent ).one_or_none()
+        # node. Use ordinary folder entry. We have to exclude the remote ones:
+        gLogger.debug( 'Looking for local folder entry %s'%dirName )
+        folderEntryQ = DB.session.query(Folder).filter(
+                      Folder.name == dirName
+                    , Folder.parent == parent
+                    , FSEntry.type == 'd' )
+        try:
+            folderEntry = folderEntryQ.one_or_none()
+        except MultipleResultsFound as e:
+            gLogger.warning('Details:')
+            for e in folderEntryQ.all():
+                fullp = [ p.name for p in e.mp.query_ancestors().all()]
+                fullp.append( e.name )
+                print( ' - %s (id=%d)'%(os.path.join(*fullp), e.id) )
+            raise
         if not folderEntry:
             gLogger.info( "Folder `%s' (%s) was not cached yet..."%(dirName, localPath) )
             folderEntry = backend.new_folder( localPath
@@ -120,6 +134,8 @@ def index_directory( dirEntry, backend
                                             , parent=parent )
             folderCreated = True
             DB.session.add( folderEntry )
+        else:
+            gLogger.info( 'Local %s folder entry found.'%dirName )
     else:
         # We're indexing a first-level "folder" relatively to node. Use
         # remote folder entry.

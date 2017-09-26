@@ -94,7 +94,11 @@ class StageMetaclass(type):
         if cls.stageName not in gCastlibStages.keys():
             gCastlibStages[cls.stageName] = classInstance
         else:
-            raise IndexError("Stage name \"%s\" is already used."%cls.queueName)
+            raise IndexError("Stage name \"%s\" is already used. "
+                    "Applicant: %s, holder: %s"%( cls.stageName
+                                                , classInstance.__name__
+                                                , gCastlibStages[cls.stageName].__name__))
+        gLogger.debug('Stage "%s" <- %s registered.'%(cls.stageName, classInstance.__name__))
         return classInstance
 
 
@@ -138,6 +142,7 @@ class Stages(list):
         doCommit=not kwargs.get('noCommit', False)
         for num, stageAttibutes in enumerate(self):
             stageInstance = stageAttibutes['classInstance']( **stageAttibutes )
+            gLogger.debug('Stage instance %r:%r created.'%(stageInstance, stageAttibutes['classInstance']))
             stageName = stageAttibutes.get('id', None) \
                         if type(stageAttibutes) is dict \
                         or type(stageAttibutes) is OrderedDict else None
@@ -150,12 +155,14 @@ class Stages(list):
             gLogger.info( "\033[1mStage %d of %d \033[0m (%s:%s)..."%(
                     num + 1, len(self),
                     stageName, stageAttibutes['classInstance'].__name__ ) )
+            gLogger.debug('Stage instance %r:%r invokation:'%(stageInstance, stageAttibutes['classInstance']))
             results[stageName] = stageInstance(
                             *args,
                             stageNum=num,
                             nstages=len(self),
                             results=results,
                             **kwargs )
+            gLogger.debug('Stage instance %r:%r done.'%(stageInstance, stageAttibutes['classInstance']))
             if doCommit:
                 gLogger.info( "Updating local caching database..." )
                 stageInstance.commit()
