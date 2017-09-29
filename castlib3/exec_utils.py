@@ -25,7 +25,7 @@ from __future__ import print_function
 Various auxilliary subroutines ususally used by executable code.
 """
 
-import yaml, os
+import os
 
 from urlparse import urlparse
 
@@ -38,9 +38,13 @@ from castlib3.backend import gCastlibBackends
 
 from collections import OrderedDict
 
-
 from sqlalchemy.engine import Engine
 from sqlalchemy import event
+
+try:
+    from sVresources import yaml
+except ImportError:
+    import yaml
 
 #@event.listens_for(Engine, "connect")
 #def set_sqlite_pragma(dbapi_connection, connection_record):

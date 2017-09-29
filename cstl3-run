@@ -26,7 +26,7 @@ import sys, ctypes
 reload(sys)
 sys.setdefaultencoding('UTF8')
 
-import argparse, yaml, os, pprint
+import argparse, os, pprint
 from urlparse import urlparse
 
 from castlib3.stage import Stages
@@ -41,6 +41,11 @@ from castlib3.exec_utils import initialize_database, \
 # this will cause automatic discovering all castlib3 stages:
 import castlib3.stages
 from castlib3.syscfg import import_config, gConfig
+
+try:
+    from sVresources import yaml
+except ImportError:
+    import yaml
 
 # Standalone run snippet for NA64 superproject:
 # $ sources/castlib2/cstl3-run \
