@@ -45,7 +45,7 @@ class Stats(object):
     def get_stats_for(self, cls):
         if cls in self.stats.keys():
             return self.stats[cls]
-        self.stats[cls] = {'created' : 0, 'updated' : 0}
+        self.stats[cls] = {'created' : 0, 'updated' : 0, 'deleted' : 0}
         return self.stats[cls]
 
     def upd_inc(self, cls):
@@ -53,6 +53,9 @@ class Stats(object):
 
     def crd_inc(self, cls):
         self.get_stats_for(cls)['created'] += 1
+
+    def dlt_inc(self, cls):
+        self.get_stats_for(cls)['deleted'] += 1
 
     def __str__(self):
         ret = []
@@ -62,6 +65,8 @@ class Stats(object):
                 s.append('%d created'%v['created'])
             if v['updated']:
                 s.append('%d updated'%v['updated'])
+            if v['deleted']:
+                s.append('%d deleted'%v['deleted'])
             ret.append('"%s" instances: %s'%(k.__name__, ', '.join(s)))
         ret = '; '.join(ret)
         if not ret or ret.isspace():
@@ -80,6 +85,8 @@ def index_directory( dirEntry, backend
 
     The function is usually called within the :class:`IndexDirectory` stage
     performing recursive traversal along the filesystem-like structure.
+
+    TODO: currently, does not support deletion of directories!
 
     :param dirEntry:
         is the dictionary of special structure (usually returned by
@@ -167,8 +174,9 @@ def index_directory( dirEntry, backend
             if not type(cEntry) is File:
                 continue
             if not cEntry.name in dirEntry['files']:
-                # TODO:
-                raise NotImplementedError('File deletion is not yet implemented.')
+                DB.session.delete( cEntry )
+                report.dlt_inc( File )
+                continue
             upd = {}
             filePath = P.join( localPath, cEntry.name )
             for fName in syncFields:
@@ -218,6 +226,7 @@ def index_directory( dirEntry, backend
         gLogger.info('Flushing caches...')
         DB.session.flush()
     for subDir in dirEntry['subFolders']:
+        # TODO: subdirs deletion
         index_directory( subDir
                        , backend
                        , parent=folderEntry
