@@ -21,8 +21,12 @@
 from distutils.core import setup
 from pip.req import parse_requirements
 
-install_reqs = parse_requirements('requirements.txt')
-reqs = [str(ir.req) for ir in install_reqs]
+try:
+    installReqs = parse_requirements('requirements.txt', session=False)
+except Exception as e:
+    installReqs = parse_requirements('requirements.txt')
+
+reqs = [str(ir.req) for ir in installReqs]
 
 setup(name = "castlib3",
     version = "0.3",

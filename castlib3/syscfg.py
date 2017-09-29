@@ -25,7 +25,12 @@ from __future__ import print_function
 Config file defining system shell integration.
 """
 
-import os, yaml
+import os
+
+try:
+    from sVresources import yaml
+except ImportError:
+    import yaml
 
 gConfig = {
     'verboseLevel' : 1,

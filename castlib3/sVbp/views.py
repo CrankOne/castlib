@@ -21,7 +21,7 @@
 
 from __future__ import print_function
 
-import os, re, json, yaml
+import os, re, json
 from flask import Blueprint, render_template, request, url_for
 from flask.views import MethodView as FlaskMethodView
 from flask_api import status as HTTP_STATUS_CODES
@@ -32,7 +32,7 @@ from castlib3.models.filesystem import Folder, File, FSEntry
 from castlib3.exec_utils import initialize_database, ordered_load, discover_locations
 
 import sVresources.db.instance
-from sVresources import apps
+from sVresources import apps, yaml
 from sVresources.utils.contentType import expected_content_type
 from sVresources.utils.queueTools import DelayedTaskViewMetaclass, CachedTaskView
 from hashlib import md5
@@ -109,7 +109,7 @@ def configure( *args, **kwargs ):
         gLogger.warning( "No \"cstlStagesDirs\" parameter is given." )
 
 def follow_path( path ):
-    folderEntry = apps.query(Folder).filter( Folder.name=='$root' ).first()
+    folderEntry = apps.db.query(Folder).filter( Folder.name=='$root' ).first()
     if not folderEntry:
         return None  # no root --- table is empty
     pToks = []
