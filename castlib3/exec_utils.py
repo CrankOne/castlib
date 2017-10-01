@@ -26,7 +26,7 @@ Various auxilliary subroutines ususally used by executable code.
 """
 
 import os
-
+from castlib3.logs import gLogger
 from urlparse import urlparse
 
 from sqlalchemy import create_engine
@@ -35,6 +35,7 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 from castlib3 import dbShim as DB
 from castlib3.models import DeclBase
 from castlib3.backend import gCastlibBackends
+from castlib3.stage import Stages
 
 from collections import OrderedDict
 
@@ -101,11 +102,13 @@ def ordered_load(stream, Loader=yaml.Loader, object_pairs_hook=OrderedDict):
 
 def discover_locations(locs):
     """
-    Takes either the path to yaml config describing locations, or just path
+    Takes either the path to YAML config describing locations, or just path
     to local directory. Returns directories dict suitable for further use
     within castlib3.filesystem.discover_entries().
     """
     directories = {}
+    if type(locs) is not str:
+        raise TypeError( 'Path argument referring to YAML file expected.' )
     lpp = urlparse(locs)
     if 'file' == lpp.scheme or '' == lpp.scheme:
         if os.path.isdir( locs ):
@@ -122,3 +125,22 @@ def discover_locations(locs):
         raise NotImplementedError('Other than "file://" scheme are not '
                 'supported yet.')
     return directories
+
+def process_stages( stages, directories=None, noCommit=False, backends={} ):
+    externalModules = stages.get('external-import', None)
+    if externalModules:
+        gLogger.info('Loading %d external import...'%len(externalModules))
+        ms = map(__import__, externalModules)
+    gLogger.debug('Initializeing stages pipeline...')
+    stages = Stages( stages['stages'] )
+    if directories:
+        # Process directories:
+        for directory in directories:
+            gLogger.info("On \"%s\" -> \"%s\" dir:"%(
+                directory['folder'], directory['folder'] ))
+            stages( directory=directory, noCommit=noCommit, backends=backends )
+    else:
+        # If no directories given, run the pipeline once without the directory
+        # parameter
+        stages( noCommit=noCommit, backends=backends )
+

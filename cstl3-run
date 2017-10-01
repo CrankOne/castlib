@@ -28,16 +28,18 @@ sys.setdefaultencoding('UTF8')
 
 import argparse, yaml, os, pprint, importlib, pprint
 from urlparse import urlparse
+from collections import OrderedDict
 
-from castlib3.stage import Stages
 from castlib3.filesystem import discover_entries
 from castlib3.logs import gLogger
 from castlib3.backend import LocalBackend
 from castlib3.castor.backend import CASTORBackend
+from castlib3.rpc import recieve_stages
 from castlib3.exec_utils import initialize_database, \
                                 ordered_load, \
                                 discover_locations, \
-                                initialize_backends
+                                initialize_backends, \
+                                process_stages
 # this will cause automatic discovering all castlib3 stages:
 import castlib3.stages
 from castlib3.syscfg import import_config, gConfig
@@ -63,13 +65,14 @@ if '__main__' == __name__:
                 type=str,
                 required=True,
                 help="Major configuration file (YAML document expected)." )
-    p.add_argument('--locations',
+    p.add_argument('-l', '--location',
                 type=str,
-                help="This argument has to be " \
-                "a YAML-file claiming a mapping between local path(s) and " \
-                "virtual database's path(s)." )
-    p.add_argument('--mode',
-                type=str, default='common',
+                action='append',
+                help="This argument has to refer one or more location " \
+                "described in the settings config. Their content will be " \
+                "then listed and passed to staging pipeline.")
+    p.add_argument('-M', '--mode',
+                type=str, default='development',
                 help="Presets mode name. Corresponds to certain section in " \
                 "configs (common/development/production/etc).")
     p.add_argument('-L', '--loglevel',  # TODO: use it!
@@ -86,11 +89,13 @@ if '__main__' == __name__:
                 action='append',
                 help="Preload a shared library within process context. Useful "\
                 "when running in ancient environments with userspace build.")
-    p.add_argument('--load-module',
+    p.add_argument('-m', '--load-module',
                 action='append',
-                help="Load a castlib3 module after initial infrastructure "\
-                "will be initialized. Use this for customizing stages set "\
-                "with custom modules.")
+                help="Load a castlib3 module after initial infrastructure " \
+                "will be initialized. Use this for customizing stages set " \
+                "with custom modules. Note: doesn't work yet with python "  \
+                "modules represented by a directory (but works with " \
+                "ordinary files instead).")
     actionG = p.add_mutually_exclusive_group(required=True)
     actionG.add_argument('--list-stages', action='store_true',
                 help="Will print available stages and terminate the script.")
@@ -99,8 +104,15 @@ if '__main__' == __name__:
                 "Useful for wildcards inspection.")
     actionG.add_argument('--stages',
                 type=argparse.FileType('r'),
-                help="Task to be performed. Ususally expressed as sequence of " \
-                "stages written in YAML file." )
+                help="A YAML file describing the task to be performed. " \
+                "Represented by a YAML file assembling one or more stages " \
+                "into processing pipeline." )
+    actionG.add_argument('--listen',
+                type=str,  # TODO: more doc about format specification
+                help="Runs script in listening mode. Opens a socket on with " \
+                "given parameters expecting the incoming stages description. " \
+                "Once the data arrived, starts the pipeline processing." \
+                "Expects an addr in form 'localhost:portno'.")
     args = p.parse_args()
 
     import_config( args.configuration, mode=args.mode )
@@ -110,6 +122,7 @@ if '__main__' == __name__:
             print( " * %s%s"%( className, classT.stageDescription ) )
         sys.exit(0)
 
+    # Shall we make it configurable?
     backends = initialize_backends( gConfig['backends'].keys()
                                   , gConfig['backends'] )  # ...
 
@@ -140,8 +153,17 @@ if '__main__' == __name__:
     # Set-up the directory paths.
     directories = {}
     
-    if args.locations:
-        directories = discover_locations( args.locations )
+    if args.location:
+        #locs = map( lambda k : gConfig['locations'][k], args.location )
+        for l in args.location:
+            if l in gConfig['locations']:
+                directories[l] = gConfig['locations'][l]
+            elif l.endswith('.yml') or l.endswith('.yaml'):
+                directories.update(discover_locations( l ))
+            else:
+                raise TypeError('Location expected to be either a reference to ' \
+                        'known locations in global config, or a dedicated .yml ' \
+                        'file. Got "%s".'%l )
 
     # Discover filesystem entries in database, and obtain files list applying
     # wildcards.
@@ -159,28 +181,23 @@ if '__main__' == __name__:
     initialize_database( gConfig['database'].pop('\\args'),
                          engineCreateKWargs=gConfig['database'] )
 
-    # Parse stages list:
-    with args.stages as f:
-        stages = ordered_load(f)
-
-    externalModules = stages.get('external-import', None)
-    if externalModules:
-        gLogger.info('Loading %d external import...'%len(externalModules))
-        ms = map(__import__, externalModules)
-
-    gLogger.debug('Initializeing stages pipeline...')
-
-    stages = Stages( stages['stages'] )
-
-    if directories:
-        # Process directories:
-        for directory in directories:
-            gLogger.info("On \"%s\" -> \"%s\" dir:"%(
-                directory['folder'], directory['folder'] ))
-            stages( directory=directory, noCommit=args.no_commit, backends=backends )
+    if args.stages:
+        # Parse stages list:
+        with args.stages as f:
+            stages = ordered_load(f)
+        process_stages( stages
+                      , directories=directories
+                      , noCommit=args.no_commit
+                      , backends=backends )
+    elif args.listen:
+        addr, port = args.listen.split(':')
+        port = int(port)
+        stages = recieve_stages(addr, port)
+        process_stages( stages
+                      , directories=directories
+                      , noCommit=args.no_commit
+                      , backends=backends )
     else:
-        # If no directories given, run the pipeline once without the directory
-        # parameter
-        stages( noCommit=args.no_commit, backends=backends )
+        raise RuntimeError( 'Undefined state: stages/listening port not specified.' )
 
 # vim: filetype=python

@@ -47,7 +47,7 @@ def discover_entries( entriesDict, backends={} ):
     {
         <inner-entry-id> : {
             'node' : <node-id>,  # optional
-            'localPath' : <local-path>,
+            'URI' : <local-path>,
             'ignore' : [ <wildcard1>, <wildcard2>, ... ],
             'only' : [ <wildcard1>, <wildcard2>, ... ],
             ... # stage-specific arguments (e.g. castorSync: <flag>)
@@ -78,7 +78,7 @@ def discover_entries( entriesDict, backends={} ):
     if not entriesDict:
         return ret
     for innerFolderID, dirListPrescript in entriesDict.iteritems():
-        uri = dirListPrescript.pop('localPath')
+        uri = dirListPrescript.pop('URI')
         lpp = urlparse(uri)
         backend = backends[lpp.scheme or 'file']
         gLogger.info( 'Listing contents of directory "%s" : %s...'%(
