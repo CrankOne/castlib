@@ -27,8 +27,12 @@ transmitting the progress information.
 """
 
 import sys, socket, json, yaml, pickle, struct, threading
-from castlib3.logs import gLogger
+from castlib3.logs import gLogger, mh
 from collections import OrderedDict
+from progress.bar import Bar
+from datetime import datetime
+from time import time
+from dateutil.relativedelta import relativedelta
 
 def send_msg(sock, msg):
     # Prefix each message with a 4-byte length (network byte order)
@@ -84,20 +88,26 @@ def recieve_stages( srvAddr, portNo ):
         conn.close()
 
 class Reporter( threading.Thread ):
-    def __init__(*args, **kwargs)
+    def __init__(self, *args, **kwargs):
         srvAddr = kwargs.pop('srvAddr')
         portNo = kwargs.pop('portNo')
         super(Reporter, self).__init__(*args, **kwargs)
         self.sock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
+        self.sock.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind(( srvAddr, portNo ))
         self.stagesCV = threading.Condition()
         self.stages = {'stages':{}}
-        self.progress = [0, 0]
+        self.progress = None
+        self.alive = threading.Event()
+
+    def start(self, *args, **kwargs):
+        self.alive.set()
+        super(Reporter, self).start( *args, **kwargs )
 
     def run(self):
-        while True and self.alive.isSet():
+        while True and self.alive.is_set():
             self.sock.listen(1)
-            conn, cliAddr = sock.accept()
+            conn, cliAddr = self.sock.accept()
             try:
                 data = recv_msg( conn )
                 if len(data) < 4:
@@ -118,16 +128,52 @@ class Reporter( threading.Thread ):
 
     def treat_request( self, data ):
         resp = { 'status' : 'ok' }
-        if 'stages' in data.keys:
+        if 'stages' in data.keys():
             if self.stagesCV.acquire(blocking=0):
                 self.stages = {'stages':data['stages']}
                 self.stagesCV.notify_all()
                 self.stagesCV.release()
+                resp['status'] = 'Accepted.'
                 return resp
             else:
                 resp['status'] = 'Busy.'
-        if 'progress' in data.keys:
-            resp['progress'] = self.progress
-        # if whatever ...
+        if 'progress' in data.keys():
+            if self.progress and issubclass(self.progress.__class__, Bar):
+                resp['progress'] = (self.progress.index, self.progress.max)
+            else:
+                resp['progress'] = (1, 1)
+        if 'progress_message' in data.keys():
+            if self.progress and issubclass(self.progress.__class__, Bar) and self.progress.message:
+                resp['progress_message'] = self.progress.message
+            else:
+                resp['progress_message'] = 'unknown activity'
+        if 'latest_msgs' in data.keys():
+            resp['latest_msgs'] = mh.get_records()
         return resp
+
+
+def human_readable_time( deltaSecs ):
+    delta = relativedelta(seconds=deltaSecs)
+    attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds']
+    return ', '.join( ['%d %s'%( getattr(delta, attr), getattr(delta, attr) > 1 and attr or attr[:-1] )
+                        for attr in attrs if getattr(delta, attr)] )
+
+class ReportingBar(Bar):
+    def __init__(self, *args, **kwargs):
+        self.reporter = kwargs.pop('reporter', None)
+        super(ReportingBar, self).__init__(*args, **kwargs)
+        if self.reporter:
+            self.reporter.progress = self
+
+    @property
+    def prec_hr_time(self):
+        dlt = time() - self.start_ts
+        #return human_readable_time( self.index*self.remaining/dlt ) if dlt > 0 else '--'
+        return human_readable_time(self.remaining*(dlt/float(self.index))) if dlt > 0 else '--'
+
+    def finish(self, *args, **kwargs):
+        super(ReportingBar, self).finish(*args, **kwargs)
+        if self.reporter:
+            self.reporter.progress = None
+
 

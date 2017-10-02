@@ -32,7 +32,7 @@ from sqlalchemy.orm.exc import MultipleResultsFound
 from os import path as P
 from urlparse import urlparse
 
-import progress.bar
+from castlib3.rpc import ReportingBar
 
 class Stats(object):
     """
@@ -78,7 +78,8 @@ def index_directory( dirEntry, backend
                     , parent=None
                     , syncFields=[]
                     , report=None
-                    , maxNewFiles=0 ):
+                    , maxNewFiles=0
+                    , reporter=None ):
     """
     This recursive function performs synchronization fielsystem entries
     (files and directories) against database entries.
@@ -105,6 +106,7 @@ def index_directory( dirEntry, backend
         When this limit will be reached, the no updating procedures will take
         place and function returns.
     """
+    print('XXX', reporter)  # XXX
     # -------------------------------------------------------------------------
     # Querying the parent structures
     report = report or Stats()
@@ -166,9 +168,10 @@ def index_directory( dirEntry, backend
     if len(folderEntry.children):
         bar = None
         if len(folderEntry.children) > 10:
-            bar = progress.bar.Bar( '  veryfying cached files in %s'%dirEntry['folder'],
-                max=len(folderEntry.children),
-                suffix='%(index)d/%(max)d, %(eta)ds remains' )
+            bar = ReportingBar( '  veryfying cached files in %s'%dirEntry['folder']
+                              , max=len(folderEntry.children)
+                              , suffix='%(index)d/%(max)d, %(prec_hr_time)s remains'
+                              , reporter=reporter )
         for cEntry in folderEntry.children.values():
             assert(issubclass(type(cEntry), FSEntry))
             if not type(cEntry) is File:
@@ -197,9 +200,10 @@ def index_directory( dirEntry, backend
     # Introducing new file entries
     bar = None
     if len((dirEntry['files'])) > 10:
-        bar = progress.bar.Bar( '  listing new entries at %s'%dirEntry['folder'],
-                max=( len((dirEntry['files'])) if 0 == maxNewFiles else maxNewFiles ),
-                suffix='%(index)d/%(max)d, %(eta)ds remains' )
+        bar = ReportingBar( '  listing new entries at %s'%dirEntry['folder']
+                          , max=( len((dirEntry['files'])) if 0 == maxNewFiles else maxNewFiles )
+                          , suffix='%(index)d/%(max)d, %(prec_hr_time)s remains'
+                          , reporter=reporter )
     for filename in dirEntry['files']:
         filePath = P.join( localPath, filename )
         fileEntry = backend.new_file( filePath
@@ -232,7 +236,8 @@ def index_directory( dirEntry, backend
                        , parent=folderEntry
                        , syncFields=syncFields
                        , report=report
-                       , maxNewFiles=maxNewFiles )
+                       , maxNewFiles=maxNewFiles
+                       , reporter=reporter )
     return folderEntry, report
 
 
@@ -256,7 +261,8 @@ class IndexDirectory( Stage ):
                 , backends={}
                 , syncFields=[]
                 , maxNewFiles=0
-                , noCommit=False ):
+                , noCommit=False
+                , reporter=None ):
         if directory is None:
             raise RuntimeError( 'Keyword argument directory= is mandatory'
                     'for this stage.' )
@@ -277,6 +283,7 @@ class IndexDirectory( Stage ):
                     'single stage evaluation.'%maxNewFiles )
         fe, rep = index_directory( directory, backend, parent=None,
                                             syncFields=syncFields,
-                                            maxNewFiles=maxNewFiles )
+                                            maxNewFiles=maxNewFiles,
+                                            reporter=reporter )
         gLogger.info( 'Sync stage stats: %s.'%( rep ) )
 

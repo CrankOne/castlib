@@ -32,7 +32,7 @@ from castlib3.logs import gLogger
 from castlib3 import dbShim as DB
 from urlparse import urlparse, urlunparse
 
-import progress.bar
+from castlib3.rpc import ReportingBar
 
 class Sync( Stage ):
     __metaclass__ = StageMetaclass
@@ -60,7 +60,7 @@ class Sync( Stage ):
                 , extractChecksumOnUpload=True
                 , validateChecksum=True
                 , allowNULL=False
-            ):
+                , reporter=None ):
         if not results:
             raise RuntimeError('The Select stage instance has to find out the '
                     'mismatches prior to syncing stage.' )
@@ -93,7 +93,8 @@ class Sync( Stage ):
                                                    , extractChecksumOnUpload=extractChecksumOnUpload
                                                    , commitEvery=commitEvery
                                                    , allowNULL=allowNULL
-                                                   , validateChecksum=validateChecksum )
+                                                   , validateChecksum=validateChecksum
+                                                   , reporter=reporter )
 
     def sync_modified( self
                      , mismatchQuery, refLoc, dstLoc
@@ -102,11 +103,13 @@ class Sync( Stage ):
                      , truncateSeconds=False
                      , extractChecksumOnUpload=True
                      , validateChecksum=True
-                     , allowNULL=False ):
+                     , allowNULL=False
+                     , reporter=None ):
         n, nMax = 0, mismatchQuery.count()
-        bar = progress.bar.Bar( 'syncing modified timestamps'
+        bar = ReportingBar( 'syncing modified timestamps'
                     , max=nMax
-                    , suffix='%(index)d/%(max)d, %(eta)ds remains' )
+                    , suffix='%(index)d/%(max)d, %(prec_hr_time)s remains'
+                    , reporter=reporter )
         for entry in mismatchQuery:
             n += 1
             trgF = entry[0]
@@ -143,10 +146,12 @@ class Sync( Stage ):
                  , truncateSeconds=False
                  , extractChecksumOnUpload=True
                  , allowNULL=False  # unused (todo?)
-                 , validateChecksum=True ):
-        #bar = progress.bar.Bar( 're-uploading files with mismatched size'
+                 , validateChecksum=True
+                 , reporter=None ):
+        #bar = ReportingBar( 're-uploading files with mismatched size'
         #            , max=mismatchQuery.count()
-        #            , suffix='%(index)d/%(max)d, %(eta)ds remains' )
+        #            , suffix='%(index)d/%(max)d, %(eta)ds remains'
+        #            , reporter=reporter )
         n, nMax = 0, mismatchQuery.count()
         for entry in mismatchQuery:
             n += 1

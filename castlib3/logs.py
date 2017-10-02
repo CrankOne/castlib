@@ -25,29 +25,54 @@ from __future__ import print_function
 File containing logging configuration for castlib2.
 """
 
-import logging, os
+import logging, os, threading
+from collections import deque
+
+class MemorizingHandler(logging.Handler):
+    def __init__(self, *args, **kwargs):
+        n = kwargs.pop('nMaxMessages', 10)
+        self.memo = deque( n*[None], n )
+        self.lock = threading.RLock()
+        logging.Handler.__init__(self)
+
+    def emit(self, record):
+        msg = self.format( record )
+        with self.lock:
+            self.memo.appendleft( msg )
+
+    def get_records(self):
+        rs = []
+        with self.lock:
+            rs = list([ r for r in self.memo ])
+        return filter( lambda r: r, rs )
 
 # create logger
-gLogger = logging.getLogger('castlib2')
+gLogger = logging.getLogger('CastLib3')
 gLogger.setLevel( logging.DEBUG )
 
 # create console handler and set level to debug
 sh = logging.StreamHandler()
-if 'DEBUG' in os.environ.keys() and int(os.environ['DEBUG']):
+dbgOn = True if 'DEBUG' in os.environ.keys() and int(os.environ['DEBUG']) else False
+if dbgOn:
     sh.setLevel( logging.DEBUG )
 else:
     sh.setLevel( logging.INFO )
 formatter = logging.Formatter('%(name)s/%(levelname)s: %(message)s')
 sh.setFormatter(formatter)
 
-ch = logging.FileHandler('/tmp/castlib2.log' )
+ch = logging.FileHandler('/tmp/castlib.log' )
 ch.setLevel( logging.DEBUG )
 
 # create formatter
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 ch.setFormatter(formatter)
 
+# memorizing handler
+mh = MemorizingHandler()
+mh.setLevel( logging.DEBUG if dbgOn else logging.INFO )
+
 gLogger.addHandler(ch)
+gLogger.addHandler(mh)
 gLogger.info('*** New castlib2 session started ***')
 gLogger.addHandler(sh)
 

@@ -26,7 +26,7 @@ import sys, ctypes, imp
 reload(sys)
 sys.setdefaultencoding('UTF8')
 
-import argparse, yaml, os, pprint, importlib, pprint
+import argparse, yaml, os, pprint, importlib, pprint, socket
 from urlparse import urlparse
 from collections import OrderedDict
 
@@ -34,7 +34,7 @@ from castlib3.filesystem import discover_entries
 from castlib3.logs import gLogger
 from castlib3.backend import LocalBackend
 from castlib3.castor.backend import CASTORBackend
-from castlib3.rpc import recieve_stages
+from castlib3.rpc import recieve_stages, Reporter
 from castlib3.exec_utils import initialize_database, \
                                 ordered_load, \
                                 discover_locations, \
@@ -192,11 +192,32 @@ if '__main__' == __name__:
     elif args.listen:
         addr, port = args.listen.split(':')
         port = int(port)
-        stages = recieve_stages(addr, port)
-        process_stages( stages
-                      , directories=directories
-                      , noCommit=args.no_commit
-                      , backends=backends )
+        reporter = Reporter(srvAddr=addr, portNo=port)
+        reporter.start()
+        reporter.stagesCV.acquire()
+        try:
+            doRun = True
+            while doRun:
+                while not reporter.stages \
+                        or 'stages' not in reporter.stages.keys() \
+                        or not reporter.stages['stages'] :
+                    gLogger.info( 'Main thread had come to the waiting state.' )
+                    # NOTE: for some reason, waiting for CV without a timeout
+                    # blocks main thread from receiving the system signals.
+                    reporter.stagesCV.wait(timeout=300)
+                gLogger.info( 'Main thread busy.' )
+                doRun = process_stages( reporter.stages
+                              , directories=directories
+                              , noCommit=args.no_commit
+                              , backends=backends
+                              , reporter=reporter )
+                gLogger.info( 'Main has been finished stages.' )
+        finally:
+            reporter.stagesCV.release()
+            gLogger.info( 'Stopping listener thread...' )
+            reporter.alive.clear()
+            reporter.sock.shutdown(socket.SHUT_RDWR)
+            reporter.join()
     else:
         raise RuntimeError( 'Undefined state: stages/listening port not specified.' )
 

@@ -126,7 +126,7 @@ def discover_locations(locs):
                 'supported yet.')
     return directories
 
-def process_stages( stages, directories=None, noCommit=False, backends={} ):
+def process_stages( stages, directories=None, noCommit=False, backends={}, reporter=None ):
     externalModules = stages.get('external-import', None)
     if externalModules:
         gLogger.info('Loading %d external import...'%len(externalModules))
@@ -138,9 +138,10 @@ def process_stages( stages, directories=None, noCommit=False, backends={} ):
         for directory in directories:
             gLogger.info("On \"%s\" -> \"%s\" dir:"%(
                 directory['folder'], directory['folder'] ))
-            stages( directory=directory, noCommit=noCommit, backends=backends )
+            stages( directory=directory, noCommit=noCommit, backends=backends, reporter=reporter )
     else:
         # If no directories given, run the pipeline once without the directory
         # parameter
-        stages( noCommit=noCommit, backends=backends )
+        stages( noCommit=noCommit, backends=backends, reporter=reporter )
+    return True  # TODO: used by external loop in listening mode
 
