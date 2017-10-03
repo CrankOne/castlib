@@ -193,7 +193,8 @@ class Sync( Stage ):
                     , truncateSeconds=False
                     , extractChecksumOnUpload=True
                     , allowNULL=False  # pointless
-                    , validateChecksum=True ):
+                    , validateChecksum=True
+                    , reporter=None ):
         n, nMax = 0, mismatchQuery.count()
         if nMax > 1e6:
             gLogger.warning('Too much entries to treat. Check selection criteria.')

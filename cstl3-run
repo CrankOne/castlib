@@ -201,10 +201,12 @@ if '__main__' == __name__:
                 while not reporter.stages \
                         or 'stages' not in reporter.stages.keys() \
                         or not reporter.stages['stages'] :
+                    reporter.workState = 'Pending.'
                     gLogger.info( 'Main thread had come to the waiting state.' )
                     # NOTE: for some reason, waiting for CV without a timeout
                     # blocks main thread from receiving the system signals.
                     reporter.stagesCV.wait(timeout=300)
+                    reporter.workState = 'Busy.'
                 gLogger.info( 'Main thread busy.' )
                 doRun = process_stages( reporter.stages
                               , directories=directories

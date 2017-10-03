@@ -99,6 +99,7 @@ class Reporter( threading.Thread ):
         self.stages = {'stages':{}}
         self.progress = None
         self.alive = threading.Event()
+        self.workState = 'Undefined.'
 
     def start(self, *args, **kwargs):
         self.alive.set()
@@ -127,7 +128,7 @@ class Reporter( threading.Thread ):
                 conn.close()
 
     def treat_request( self, data ):
-        resp = { 'status' : 'ok' }
+        resp = { 'status' : 'ok', 'workState' : self.workState }
         if 'stages' in data.keys():
             if self.stagesCV.acquire(blocking=0):
                 self.stages = {'stages':data['stages']}
