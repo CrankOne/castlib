@@ -183,3 +183,13 @@ class RemoteFolder( Folder, UpdatingMixin ):
         'polymorphic_identity' : 'r',
     }
 
+class ExpiringEntry(DeclBase):
+    """
+    An (local) filesystem entries that have expiration date. They're usually
+    a temporary ones.
+    """
+    __tablename__ = 'expiration'
+    fsInstanceID = Column( Integer, ForeignKey(FSEntry.id), primary_key=True )
+    fsOriginalID = Column( Integer, ForeignKey(FSEntry.id) )
+    expiration = Column( DateTime, nullable=False )
+
