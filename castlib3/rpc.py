@@ -87,7 +87,38 @@ def recieve_stages( srvAddr, portNo ):
     finally:
         conn.close()
 
+def human_readable_time( deltaSecs ):
+    delta = relativedelta(seconds=deltaSecs)
+    attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds']
+    return ', '.join( ['%d %s'%( getattr(delta, attr), getattr(delta, attr) > 1 and attr or attr[:-1] )
+                        for attr in attrs if getattr(delta, attr)] )
+
+class ReportingBar(Bar):
+    def __init__(self, *args, **kwargs):
+        self.reporter = kwargs.pop('reporter', None)
+        super(ReportingBar, self).__init__(*args, **kwargs)
+        if self.reporter:
+            self.reporter.progress = self
+
+    @property
+    def prec_hr_time(self):
+        dlt = time() - self.start_ts
+        #return human_readable_time( self.index*self.remaining/dlt ) if dlt > 0 else '--'
+        return human_readable_time(self.remaining*(dlt/float(self.index))) if dlt > 0 else '--'
+
+    def finish(self, *args, **kwargs):
+        super(ReportingBar, self).finish(*args, **kwargs)
+        if self.reporter:
+            self.reporter.progress = None
+
+# TODO: move reporter and views and stuff to dedicated module (rpc/ dir?)
+gReportingViews = {}
+
 class Reporter( threading.Thread ):
+    """
+    The Reporter object represents a listening thread (server) providing basic
+    RPC of running cstl3 process with external users.
+    """
     def __init__(self, *args, **kwargs):
         srvAddr = kwargs.pop('srvAddr')
         portNo = kwargs.pop('portNo')
@@ -128,53 +159,74 @@ class Reporter( threading.Thread ):
                 conn.close()
 
     def treat_request( self, data ):
-        resp = { 'status' : 'ok', 'workState' : self.workState }
-        if 'stages' in data.keys():
-            if self.stagesCV.acquire(blocking=0):
-                self.stages = {'stages':data['stages']}
-                self.stagesCV.notify_all()
-                self.stagesCV.release()
-                resp['status'] = 'Accepted.'
-                return resp
+        resp = { 'status' : 'ok'
+               , 'workState' : self.workState
+               , 'errors' : [] }
+        for k, v in gReportingViews.iteritems():
+            if k in data.keys():
+                resp[k] = v( self, data )
+        for k, v in data.iteritems():
+            if k in gReportingViews.keys():
+                try:
+                    resp[k] = gReportingViews[k]( self, data )
+                except Exception as e:
+                    resp['errors'].append(
+                            'Error %s: %r.'%( type(e), e ) )
             else:
-                resp['status'] = 'Busy.'
-        if 'progress' in data.keys():
-            if self.progress and issubclass(self.progress.__class__, Bar):
-                resp['progress'] = (self.progress.index, self.progress.max)
-            else:
-                resp['progress'] = (1, 1)
-        if 'progress_message' in data.keys():
-            if self.progress and issubclass(self.progress.__class__, Bar) and self.progress.message:
-                resp['progress_message'] = self.progress.message
-            else:
-                resp['progress_message'] = 'unknown activity'
-        if 'latest_msgs' in data.keys():
-            resp['latest_msgs'] = mh.get_records()
+                resp['errors'].append(
+                        'Unknown/unsupported request field: "%s".'%k )
         return resp
 
+#
+# Reporter views
+###############
 
-def human_readable_time( deltaSecs ):
-    delta = relativedelta(seconds=deltaSecs)
-    attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds']
-    return ', '.join( ['%d %s'%( getattr(delta, attr), getattr(delta, attr) > 1 and attr or attr[:-1] )
-                        for attr in attrs if getattr(delta, attr)] )
+def _reporter_view__run_stages( reporter, data ):
+    resp = {}
+    if 'stages' not in data.keys():
+        raise RuntimeError( 'Bad request.' )
+    if reporter.stagesCV.acquire(blocking=0):
+        reporter.stages = {'stages':data['stages']}
+        reporter.stagesCV.notify_all()
+        reporter.stagesCV.release()
+        resp['stage-accepted-status'] = 'Accepted.'
+    else:
+        resp['stage-accepted-status'] = 'Busy.'
+    return resp
 
-class ReportingBar(Bar):
-    def __init__(self, *args, **kwargs):
-        self.reporter = kwargs.pop('reporter', None)
-        super(ReportingBar, self).__init__(*args, **kwargs)
-        if self.reporter:
-            self.reporter.progress = self
+gReportingViews['run-stages'] = _reporter_view__run_stages
 
-    @property
-    def prec_hr_time(self):
-        dlt = time() - self.start_ts
-        #return human_readable_time( self.index*self.remaining/dlt ) if dlt > 0 else '--'
-        return human_readable_time(self.remaining*(dlt/float(self.index))) if dlt > 0 else '--'
 
-    def finish(self, *args, **kwargs):
-        super(ReportingBar, self).finish(*args, **kwargs)
-        if self.reporter:
-            self.reporter.progress = None
+def _reporter_view__query_progress( reporter, data ):
+    resp = {}
+    if reporter.progress and issubclass(reporter.progress.__class__, Bar):
+        return ( reporter.progress.index
+               , reporter.progress.max
+               , reporter.progress.prec_hr_time )
+    else:
+        return (1, 1, 'unknown')
+    return resp
 
+gReportingViews['query-progress'] = _reporter_view__query_progress
+
+
+def _reporter_view__query_progress_message( reporter, data ):
+    if reporter.progress and issubclass(reporter.progress.__class__, Bar) and reporter.progress.message:
+        return reporter.progress.message
+    else:
+        return 'unknown activity'
+
+gReportingViews['query-progress-msg'] = _reporter_view__query_progress
+
+
+def _reporter_view__query_latest_msgs( reporter, data ):
+    return mh.get_records()
+
+gReportingViews['query-lates-msgs'] = _reporter_view__query_progress
+
+# TODO: list-views
+# TODO: list-stages
+# TODO: list-tasks
+# TODO: run-task
+# TODO: list-backends
 

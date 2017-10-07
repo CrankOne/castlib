@@ -19,6 +19,8 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+from __future__ import print_function
+
 import os, fnmatch
 from urlparse import urlparse, urlunsplit
 from castlib3.logs import gLogger
@@ -40,19 +42,16 @@ def split_path( path ):
     pToks.reverse()
     return pToks
 
-def discover_entries( entriesDict, backends={} ):
+def discover_entries( dirListPrescript, backends={} ):
     """
     This function builds a filesystem entries dictionary for stages. It expects
     a dictionary in form:
     {
-        <inner-entry-id> : {
-            'node' : <node-id>,  # optional
-            'URI' : <local-path>,
-            'ignore' : [ <wildcard1>, <wildcard2>, ... ],
-            'only' : [ <wildcard1>, <wildcard2>, ... ],
-            ... # stage-specific arguments (e.g. castorSync: <flag>)
-        }
-        ...
+        'node' : <node-id>,  # optional
+        'URI' : <local-path>,
+        'ignore' : [ <wildcard1>, <wildcard2>, ... ],
+        'only' : [ <wildcard1>, <wildcard2>, ... ],
+        ... # stage-specific arguments (e.g. castorSync: <flag>)
     }
     Where `ignore' and `only' wildcards lists are not mutually exclusive. When
     both given the `ignore' will be applied after `only' selector. The
@@ -60,49 +59,52 @@ def discover_entries( entriesDict, backends={} ):
     persistent data.
     
     The folder value is a tuple of (realPath, virtualFolderName).
-    The `files' entries are merely string filenames of files to be indexed.
-    `directories' entry is a dictionaries following the same topology
-    recursively.
+    The `files' entries may be merely a set of filenames of files to be
+    indexed, or dictionary of dictionaries containing the following data:
+    {'size:int', 'adler32:string', 'modified:timestamp'}.
+    The `directories' entry is a dictionaries following the same topology
+    recursively with optional 'modified:timestamp' entry.
 
     Note, that in case of deleted directory content, none of the internal
     directories will be removed from database. This routine designed for
     intermediate representation of synchronization parameters, prior to
-    castlib3 `stages' execution, not for standalone use.
+    castlib3 stages IndexDirectory stage execution, not for standalone use.
 
     localPaths are always a full paths while `files' are just
     filenames.
+
+    Will produce the following dict structure:
+    {
+        'folder' : <folder-URI>,
+        'files' : <set/dict of files objects>,
+        'subFolder' : <list-of-same-structs>
+    }
     """
     # Traverse directories content, forming the list without directories
     # resolution:
-    ret = []
-    if not entriesDict:
-        return ret
-    for innerFolderID, dirListPrescript in entriesDict.iteritems():
-        uri = dirListPrescript.pop('URI')
-        lpp = urlparse(uri)
-        backend = backends[lpp.scheme or 'file']
-        gLogger.info( 'Listing contents of directory "%s" : %s...'%(
-            innerFolderID, uri) )
-        dirContent = backend.get_dir_content(
-                uri,
-                onlyPats=dirListPrescript.pop('only', None),
-                ignorePats=dirListPrescript.pop('ignore', None),
-                extra=dirListPrescript
-            )
+    uri = dirListPrescript.pop('URI')
+    lpp = urlparse(uri)
+    backend = backends[lpp.scheme or 'file']
+    gLogger.info( 'Listing contents of directory %s...'%(uri) )
+    dirContent = backend.get_dir_content(
+            uri,
+            onlyPats=dirListPrescript.pop('only', None),
+            ignorePats=dirListPrescript.pop('ignore', None),
+            extra=dirListPrescript
+        )
+    if lpp.netloc:
+        dirContent['node'] = lpp.netloc
+    # Prepend folder path:
+    pToks = split_path( os.path.split(lpp.path)[0] )
+    while pToks:
+        uri = urlunsplit((lpp.scheme, lpp.netloc, os.path.join(*pToks), '', ''))
+        pToks.pop()
+        dirContent = {
+                'folder' : uri,
+                'files' : set([]),
+                'subFolders' : [dirContent]
+            }
         if lpp.netloc:
             dirContent['node'] = lpp.netloc
-        # Prepend folder path:
-        pToks = split_path( os.path.split(lpp.path)[0] )
-        while pToks:
-            uri = urlunsplit((lpp.scheme or '', lpp.netloc or '', os.path.join(*pToks), '', ''))
-            pToks.pop()
-            dirContent = {
-                    'folder' : uri,
-                    'files' : [],
-                    'subFolders' : [dirContent]
-                }
-            if lpp.netloc:
-                dirContent['node'] = lpp.netloc
-        ret.append( dirContent )
-    return ret
+    return dirContent
         

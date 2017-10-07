@@ -5,9 +5,11 @@ synchronization database with local and (or) original entires.
 Can be used for end-user script composition.
 """
 
-__all__ = [ 'indexLocalDir'
-          , 'send'
+__all__ = [ 'copy-attr'
+          , 'index-dir'
+          , 'retrieve-certain'
           , 'select'
+          , 'send'
           , 'sync'
     ]
 

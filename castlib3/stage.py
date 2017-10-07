@@ -152,6 +152,7 @@ class Stages(list):
                     stageName = '%s-%d'%(stageAttibutes['class'], n)
                     if stageName not in results.keys():
                         break
+                    n += 1
             gLogger.info( "\033[1mStage %d of %d \033[0m (%s:%s)..."%(
                     num + 1, len(self),
                     stageName, stageAttibutes['classInstance'].__name__ ) )

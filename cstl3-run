@@ -22,7 +22,7 @@
 
 from __future__ import print_function
 
-import sys, ctypes, imp
+import sys, ctypes, imp, re
 reload(sys)
 sys.setdefaultencoding('UTF8')
 
@@ -34,26 +34,21 @@ from castlib3.filesystem import discover_entries
 from castlib3.logs import gLogger
 from castlib3.backend import LocalBackend
 from castlib3.castor.backend import CASTORBackend
+from castlib3.eos.backend import EOSBackend
 from castlib3.rpc import recieve_stages, Reporter
-from castlib3.exec_utils import initialize_database, \
+from castlib3.exec_utils import configure_cstl3, \
                                 ordered_load, \
-                                discover_locations, \
-                                initialize_backends, \
-                                process_stages
+                                execute_task
 # this will cause automatic discovering all castlib3 stages:
 import castlib3.stages
 from castlib3.syscfg import import_config, gConfig
+
+rxsOverrideOption = r'^(?P<path>[\w\/]+)=(?P<value>[\w.]+)(?:\:(?P<type>\w+))?$'
 
 try:
     from sVresources import yaml
 except ImportError:
     import yaml
-
-# Standalone run snippet for NA64 superproject:
-# $ sources/castlib2/cstl3-run \
-#                --db-conf presets.build/configs/db.yml \
-#                --stages presets.build/configs/cstl3-tasks/cstl3-spec.yml \
-#                --local-path presets.build/byHosts/$(hostname)/cstl3.yml 
 
 gExtModules = {}
 
@@ -61,57 +56,77 @@ if '__main__' == __name__:
     p = argparse.ArgumentParser(description="""
     Executable script performing staged routine provided by castlib3 package.
     """)
-    p.add_argument('-c', '--configuration',
-                type=str,
-                required=True,
-                help="Major configuration file (YAML document expected)." )
-    p.add_argument('-l', '--location',
-                type=str,
-                action='append',
-                help="This argument has to refer one or more location " \
-                "described in the settings config. Their content will be " \
-                "then listed and passed to staging pipeline.")
-    p.add_argument('-M', '--mode',
-                type=str, default='development',
-                help="Presets mode name. Corresponds to certain section in " \
+    p.add_argument('-c', '--configuration'
+                , type=str
+                , required=True
+                , help="Major configuration file (YAML document expected)." )
+    p.add_argument('-M', '--mode'
+                , type=str, default='development'
+                , help="Presets mode name. Corresponds to certain section in "
                 "configs (common/development/production/etc).")
-    p.add_argument('-L', '--loglevel',  # TODO: use it!
-                default='info',
-                help="Log level with which to run castlib3 routines. Allowed " \
+    p.add_argument('-L', '--loglevel'  # TODO: use it!
+                , default='info'
+                , help="Log level with which to run castlib3 routines. Allowed "
                 "values are: debug, info, warning, error.")
-    p.add_argument('--no-commit',
-                action='store_true',
-                help="When given no database changes will be actually " \
-                "commited. This is a development command helping one to " \
-                "check what changes are going to happen. May break the " \
-                "staging sequence.")
-    p.add_argument('-p','--preload-lib',
-                action='append',
-                help="Preload a shared library within process context. Useful "\
+    p.add_argument('-p','--preload-lib'
+                , action='append'
+                , help="Preload a shared library within process context. Useful "
                 "when running in ancient environments with userspace build.")
-    p.add_argument('-m', '--load-module',
-                action='append',
-                help="Load a castlib3 module after initial infrastructure " \
-                "will be initialized. Use this for customizing stages set " \
-                "with custom modules. Note: doesn't work yet with python "  \
-                "modules represented by a directory (but works with " \
+    p.add_argument('-m', '--load-module'
+                , action='append'
+                , help="Load a castlib3 module after initial infrastructure "
+                "will be initialized. Use this for customizing stages set "
+                "with custom modules. Note: doesn't work yet with python "
+                "modules represented by a directory (but works with "
                 "ordinary files instead).")
+    p.add_argument('-O', '--override'
+                , action='append'
+                , help='Development feauture. May be a pair in form '
+                '"path=value[:type]" where "path" is a slash-separated path '
+                'within the stages dict to the '
+                'parameter to be overriden, and the type is one of the simple '
+                'types to be overriden. If no "type" is given, it will be '
+                'assumed a type of original parameter. If no original '
+                'parameter is given the type will be assumed being a string.' )
+    p.add_argument( '--disable-backend'
+                , type=str
+                , action='append'
+                , help='Backends to be disabled during the run. Overrides ones '
+                'provided within configuration file.' )
+    p.add_argument( '--disable-location'
+                , type=str
+                , action='append'
+                , help='Locations to be disabled during the run (disables only'
+                'ones listed in configuration file).')
+    #
+    stagesG = p.add_mutually_exclusive_group(required=False)
+    stagesG.add_argument( '--omit'
+                , action='append'
+                , help="Only for --stages. When processing a task as a "
+                "pipeline, referes the stages to be omitted from processing." )
+    stagesG.add_argument( '--only'
+                , action='append'
+                , help="Only for --stages. When processing a task as a "
+                "pipeline, referes the stages that only have to be executed, "
+                "in order." )
+    #
     actionG = p.add_mutually_exclusive_group(required=True)
-    actionG.add_argument('--list-stages', action='store_true',
-                help="Will print available stages and terminate the script.")
-    actionG.add_argument('--dry', action='store_true',
-                help="Will print directories to index and terminate the script. " \
-                "Useful for wildcards inspection.")
-    actionG.add_argument('--stages',
-                type=argparse.FileType('r'),
-                help="A YAML file describing the task to be performed. " \
-                "Represented by a YAML file assembling one or more stages " \
+    actionG.add_argument('--list-stages'
+                , action='store_true'
+                , help="Will print available stages and terminate the script.")
+    actionG.add_argument('--list-backends'
+                , action='store_true'
+                , help="Will print available backends and terminate the script.")
+    actionG.add_argument('--stages-file'
+                , type=argparse.FileType('r')
+                , help="A YAML file describing the task to be performed. "
+                "Represented by a YAML file assembling one or more stages "
                 "into processing pipeline." )
-    actionG.add_argument('--listen',
-                type=str,  # TODO: more doc about format specification
-                help="Runs script in listening mode. Opens a socket on with " \
-                "given parameters expecting the incoming stages description. " \
-                "Once the data arrived, starts the pipeline processing." \
+    actionG.add_argument('--listen'
+                , type=str
+                , help="Runs script in listening mode. Opens a socket on with "
+                "given parameters expecting the incoming stages description. "
+                "Once the data arrived, starts the pipeline processing."
                 "Expects an addr in form 'localhost:portno'.")
     args = p.parse_args()
 
@@ -122,9 +137,9 @@ if '__main__' == __name__:
             print( " * %s%s"%( className, classT.stageDescription ) )
         sys.exit(0)
 
-    # Shall we make it configurable?
-    backends = initialize_backends( gConfig['backends'].keys()
-                                  , gConfig['backends'] )  # ...
+    if args.list_backends:
+        raise NotImplementedError()  # TODO
+        sys.exit(0)
 
     for pl in args.preload_lib or []:
         ctypes.cdll.LoadLibrary(pl)
@@ -146,53 +161,37 @@ if '__main__' == __name__:
             # import module
             if m not in gExtModules.keys():
                 gLogger.info('Loading python module %s...'%(m))
-                gExtModules[m] = importlib.import_module(m, package='castlib3')
+                try:
+                    gExtModules[m] = importlib.import_module(m, package='castlib3')
+                except ImportError:
+                    gLogger.info( 'Direct import of "%s" failed. '
+                            'Assuming CWD as location.'%m )
+                    sys.path.insert(0, os.path.abspath('.'))
+                    gExtModules[m] = __import__(m)
             else:
                 gLogger.warning('Omitting repeatative import of %s.'%m)
 
-    # Set-up the directory paths.
-    directories = {}
-    
-    if args.location:
-        #locs = map( lambda k : gConfig['locations'][k], args.location )
-        for l in args.location:
-            if l in gConfig['locations']:
-                directories[l] = gConfig['locations'][l]
-            elif l.endswith('.yml') or l.endswith('.yaml'):
-                directories.update(discover_locations( l ))
-            else:
-                raise TypeError('Location expected to be either a reference to ' \
-                        'known locations in global config, or a dedicated .yml ' \
-                        'file. Got "%s".'%l )
+    gConfig, backends = configure_cstl3( gConfig
+                   , disabledBackends=(args.disable_backend or [])
+                   , disabledLocations=(args.disable_location or []) )
 
-    # Discover filesystem entries in database, and obtain files list applying
-    # wildcards.
-    if directories:
-        directories = discover_entries( directories, backends=backends )
+    # ... whatever?
 
-    # For dry run, just print the content to be indexed and that's it.
-    if args.dry:
-        pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint( directories )
-        sys.exit(0)
-
-    # Explicitly initialize database, if database config was provided:
-    dbConf = gConfig
-    initialize_database( gConfig['database'].pop('\\args'),
-                         engineCreateKWargs=gConfig['database'] )
-
-    if args.stages:
+    if args.stages_file:
         # Parse stages list:
-        with args.stages as f:
-            stages = ordered_load(f)
-        process_stages( stages
-                      , directories=directories
-                      , noCommit=args.no_commit
-                      , backends=backends )
+        with args.stages_file as f:
+            task = ordered_load(f)
+        execute_task( task
+                    , omitStages=(args.omit or [])
+                    , onlyStages=(args.only or [])
+                    , backends=backends
+                    , locations=gConfig['locations'] )
+        #process_stages( stagesDescription
+        #              , noCommit=args.no_commit
+        #              , backends=backends )
     elif args.listen:
         addr, port = args.listen.split(':')
-        port = int(port)
-        reporter = Reporter(srvAddr=addr, portNo=port)
+        reporter = Reporter(srvAddr=addr, portNo=int(port))
         reporter.start()
         reporter.stagesCV.acquire()
         try:
@@ -202,21 +201,20 @@ if '__main__' == __name__:
                         or 'stages' not in reporter.stages.keys() \
                         or not reporter.stages['stages'] :
                     reporter.workState = 'Pending.'
-                    gLogger.info( 'Main thread had come to the waiting state.' )
+                    gLogger.debug( 'Main thread had come to the waiting state.' )
                     # NOTE: for some reason, waiting for CV without a timeout
                     # blocks main thread from receiving the system signals.
                     reporter.stagesCV.wait(timeout=300)
                     reporter.workState = 'Busy.'
-                gLogger.info( 'Main thread busy.' )
+                gLogger.debug( 'Main thread busy.' )
                 doRun = process_stages( reporter.stages
-                              , directories=directories
                               , noCommit=args.no_commit
                               , backends=backends
                               , reporter=reporter )
-                gLogger.info( 'Main has been finished stages.' )
+                gLogger.debug( 'Main has been finished stages.' )
         finally:
             reporter.stagesCV.release()
-            gLogger.info( 'Stopping listener thread...' )
+            gLogger.debug( 'Stopping listener thread...' )
             reporter.alive.clear()
             reporter.sock.shutdown(socket.SHUT_RDWR)
             reporter.join()

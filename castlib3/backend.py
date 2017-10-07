@@ -178,6 +178,10 @@ class AbstractBackend(object):
         Additional keyword arguments will be forwarded directly to underlying
         sqlalchemy ctr.  The keyword arguments takes precedence on the ones
         obtained using back-end.
+
+        The check for keyword arguments is strongly desirable since it allows
+        to avoid redundant querying! The back-end has to automatically
+        use the knownAttrs when they're given as keyword arguments.
         """
         kwd = dict(kwargs)
         sf = kwd.pop('syncFields', ['modified', 'size'])

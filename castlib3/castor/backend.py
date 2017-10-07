@@ -46,7 +46,7 @@ class CASTORBackend(AbstractBackend):
                           , regexToApply=rxNSLS)[0]['adler32']
 
     def get_permissions(self, path):
-        raise NotImplementedError()
+        raise NotImplementedError('Permissions management is not yet implemented (CASTOR).')
 
     def get_size(self, path):
         lpp = urlparse(path)
@@ -128,7 +128,7 @@ class CASTORBackend(AbstractBackend):
         entries = invoke_util('nsls', timeout='long', remotePath=ppl.path, regexToApply=rxNSLS)
         gLogger.debug('Acquired contents list of "%s".'%ppl.path)
         # Get rid from the logically deleted files and symlinks. The only types
-        # to remain is files and directories: '-', 'm' and 'd'.
+        # to remain are the files and directories ('-', 'm' and 'd').
         entries = filter( lambda e: e['mode'][0] in 'md-', entries )
         if onlyPats:
             if type(onlyPats) is str:
@@ -146,11 +146,16 @@ class CASTORBackend(AbstractBackend):
             for wcard in ignorePats:
                 entries = list(filter( lambda e: \
                                     not fnmatch.fnmatch(e['filename'], wcard), entries ))
-        files = filter( lambda e: e['mode'][0] in '-m', entries )
         subds = filter( lambda e: e['mode'][0] == '', entries )
+        filesDict = {}
+        for e in filter( lambda e: e['mode'][0] in '-m', entries ):
+            filesDict[e.pop('filename')] = {
+                        'size' : e['fileSize'],
+                        'adler32' : e['adler32']
+                    }
         ret = {
             'folder' : uri,
-            'files' : map( lambda e: e['filename'], files ),
+            'files' : filesDict,
             'subFolders' : []
         }
         for subd in subds:

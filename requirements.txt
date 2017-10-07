@@ -5,4 +5,5 @@ pyyaml
 beautifulsoup4
 sqlamp
 progress
+dpath
 #psycopg2

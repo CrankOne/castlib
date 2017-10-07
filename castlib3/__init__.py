@@ -32,13 +32,18 @@ from castlib3.models import DeclBase
 
 from sqlalchemy.interfaces import PoolListener
 
-def initialize_database(    engineCreateArgs,
-                            engineCreateKWargs={'echo' : True} ):
+def _initialize_database( engineCreateArgs,
+                          engineCreateKWargs={'echo' : True} ):
     """
     The database initialization function that has to be invoked prior to any
     database operation. Sets up SQLAlchemy's machinery according to castlib2
     needs: creates the engine, composes tables metadata and initializes
     session.
+
+    Note, that this function is somewhat default implementation intended for
+    urgent initialization of the database, if no instance was initialized
+    before. For orderly initialization process use initialize_database()
+    function from the castlib3.exec_utils module.
     """
     engine = create_engine(*engineCreateArgs, **engineCreateKWargs)
     dbS = scoped_session(sessionmaker(
@@ -62,7 +67,7 @@ class _DatabaseShim(object):
         if self._session is None:
             gLogger.debug( "No extra configuration provided for database. Initializing " \
                 "instance with default parameters." )
-            self._engine, self._session = initialize_database(
+            self._engine, self._session = _initialize_database(
                         ["sqlite:///castlib3-database.sqlite"],
                         engineCreateKWargs={
                                 'encoding' : 'utf8',

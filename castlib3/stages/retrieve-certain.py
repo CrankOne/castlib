@@ -59,7 +59,7 @@ class Retrieve2TempLoc( Stage ):
         }
 
     def __init__(self, *args, **kwargs):
-        super(MaintainTempLoc, self).__init__(*args, **kwargs)
+        super(Retrieve2TempLoc, self).__init__(*args, **kwargs)
 
     def _V_call( self
                 , retrieveNames=[]

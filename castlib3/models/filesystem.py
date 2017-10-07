@@ -28,6 +28,7 @@ from sqlalchemy.orm import relationship, Session
 from sqlalchemy.orm.collections import attribute_mapped_collection
 
 from castlib3.models import DeclBase
+from castlib3.logs import gLogger
 
 from urlparse import urlunsplit
 
@@ -41,7 +42,16 @@ class UpdatingMixin(object):
         for k, v in kwargs.iteritems():
             if mappings and k in mappings.keys():
                 k = mappings[k]
-            if getattr( self, k ) != v:
+            av = getattr( self, k )
+            tv = v
+            if av is not None:
+                if type(av) is not type(tv):
+                    try:
+                        tv = type(av)(tv)
+                    except TypeError:
+                        gLogger.error( 'Expected type: %s, given: %s.'%( type(av), type(tv) ) )
+                        raise
+            if av != tv:
                 setattr(self, k, v)
                 updated = True
         return updated

@@ -22,6 +22,7 @@
 import os
 
 from castlib3.stage import Stage, StageMetaclass
+from castlib3.filesystem import discover_entries
 from castlib3.models.filesystem import Folder, File, RemoteFolder, StoragingNode, FSEntry
 from castlib3.logs import gLogger
 from castlib3.backend import LocalBackend
@@ -74,20 +75,20 @@ class Stats(object):
         return ret
 
 
-def index_directory( dirEntry, backend
+def index_directory( dirEntry
+                    , backend
                     , parent=None
                     , syncFields=[]
                     , report=None
                     , maxNewFiles=0
-                    , reporter=None ):
+                    , reporter=None
+                    , dirModified=None ):
     """
     This recursive function performs synchronization fielsystem entries
     (files and directories) against database entries.
 
     The function is usually called within the :class:`IndexDirectory` stage
     performing recursive traversal along the filesystem-like structure.
-
-    TODO: currently, does not support deletion of directories!
 
     :param dirEntry:
         is the dictionary of special structure (usually returned by
@@ -106,7 +107,6 @@ def index_directory( dirEntry, backend
         When this limit will be reached, the no updating procedures will take
         place and function returns.
     """
-    print('XXX', reporter)  # XXX
     # -------------------------------------------------------------------------
     # Querying the parent structures
     report = report or Stats()
@@ -138,13 +138,18 @@ def index_directory( dirEntry, backend
             raise
         if not folderEntry:
             gLogger.info( "Folder `%s' (%s) was not cached yet..."%(dirName, localPath) )
-            folderEntry = backend.new_folder( localPath
-                                            , name=dirName
-                                            , parent=parent )
+            fCreateKWargs = {
+                        'name' : dirName,
+                        'parent' : parent
+                    }
+            if dirModified is not None:
+                fCreateKWargs['modified'] = dirModified
+            folderEntry = backend.new_folder( localPath, **fCreateKWargs )
             folderCreated = True
             DB.session.add( folderEntry )
         else:
             gLogger.info( 'Local %s folder entry found.'%dirName )
+            # TODO: check `modified' timestamp/datetime object
     else:
         # We're indexing a first-level "folder" relatively to node. Use
         # remote folder entry.
@@ -155,11 +160,15 @@ def index_directory( dirEntry, backend
                     , scheme=backend.scheme )
         if nodeCreated:
             report.crd_inc(StoragingNode)
-        folderEntry, folderCreated = DB.get_or_create( RemoteFolder
-                    , node=node
-                    , name=dirName
-                    , path=localPath
-                    , parent=parent )
+        fCreateKWargs = {
+                    'name' : dirName,
+                    'parent' : parent,
+                    'node' : node,
+                    'path' : localPath
+                }
+        if dirModified is not None:
+            fCreateKWargs['modified'] = dirModified
+        folderEntry, folderCreated = DB.get_or_create( RemoteFolder, **fCreateKWargs )
         if nodeCreated or folderCreated:
             DB.session.add(node)
             DB.session.flush()
@@ -183,13 +192,27 @@ def index_directory( dirEntry, backend
             upd = {}
             filePath = P.join( localPath, cEntry.name )
             for fName in syncFields:
-                upd[fName] = getattr(backend, 'get_' + fName)(filePath)
+                doRetrieve = False
+                if type(dirEntry['files']) is dict:
+                    if fName in dirEntry['files'][cEntry.name].keys():
+                        upd[fName] = dirEntry['files'][cEntry.name][fName]
+                    else:
+                        doRetrieve = True
+                elif type(dirEntry['files']) is set:
+                    doRetrieve = True
+                else:
+                    raise TypeError('Unexpected type of "files" entry: %s'%(type(dirEntry['files'])))
+                if doRetrieve:
+                    upd[fName] = getattr(backend, 'get_' + fName)(filePath)
             fileUpdated = cEntry.update_fields(**upd)
             if fileUpdated:
                 DB.session.add(cEntry)
                 report.upd_inc(File)
                 folderUpdated = True
-            dirEntry['files'].remove(cEntry.name)
+            if type(dirEntry['files']) is set:
+                dirEntry['files'].remove(cEntry.name)
+            else:
+                del dirEntry['files'][cEntry.name]
             if bar:
                 bar.next()
         if bar:
@@ -204,19 +227,37 @@ def index_directory( dirEntry, backend
                           , max=( len((dirEntry['files'])) if 0 == maxNewFiles else maxNewFiles )
                           , suffix='%(index)d/%(max)d, %(prec_hr_time)s remains'
                           , reporter=reporter )
-    for filename in dirEntry['files']:
-        filePath = P.join( localPath, filename )
-        fileEntry = backend.new_file( filePath
-                                    , name=filename
-                                    , syncFields=syncFields
-                                    , parent=folderEntry )
-        folderUpdated = True
-        report.crd_inc(File)
-        if bar:
-            bar.next()
-        if maxNewFiles > 0 \
-            and report.get_stats_for(File)['created'] >= maxNewFiles:
-            break  # maxNewFiles limit exceeded
+    if type(dirEntry['files']) is set:
+        for filename in dirEntry['files']:
+            filePath = P.join( localPath, filename )
+            fileEntry = backend.new_file( filePath
+                                        , name=filename
+                                        , syncFields=syncFields
+                                        , parent=folderEntry )
+            folderUpdated = True
+            report.crd_inc(File)
+            if bar:
+                bar.next()
+            if maxNewFiles > 0 \
+                and report.get_stats_for(File)['created'] >= maxNewFiles:
+                break  # maxNewFiles limit exceeded
+    elif type(dirEntry['files']) is dict:
+        for filename, knownAttrs in dirEntry['files'].iteritems():
+            filePath = P.join( localPath, filename )
+            # NOTE: to avoid redundant queries, back-ends have to automatically
+            # use the knownAttrs when they're given as keyword arguments.
+            fileEntry = backend.new_file( filePath
+                                        , name=filename
+                                        , syncFields=syncFields
+                                        , parent=folderEntry
+                                        , **knownAttrs )
+            folderUpdated = True
+            report.crd_inc(File)
+            if bar:
+                bar.next()
+            if maxNewFiles > 0 \
+                and report.get_stats_for(File)['created'] >= maxNewFiles:
+                break  # maxNewFiles limit exceeded
     if bar:
         bar.finish()
     # -------------------------------------------------------------------------
@@ -229,8 +270,15 @@ def index_directory( dirEntry, backend
         DB.session.add( folderEntry )
         gLogger.info('Flushing caches...')
         DB.session.flush()
+    # Subdirs deletion:
+    if not folderCreated:
+        for subdE in DB.session.query(Folder).filter( Folder.name == dirName
+                                                    , Folder.parent == folderEntry ).all():
+            if subdE.name not in dirEntry['subFolders']:
+                DB.session.delete(subdE)
+                report.dlt_inc( Folder )
+    # Subdirs indexing:
     for subDir in dirEntry['subFolders']:
-        # TODO: subdirs deletion
         index_directory( subDir
                        , backend
                        , parent=folderEntry
@@ -246,9 +294,14 @@ class IndexDirectory( Stage ):
     __castlib3StageParameters = {
         'name' : 'index-dir',
         'description' : """
-        Will perform recursive indexing of given local directory content. For
+        Will perform recursive indexing of given directory(-ies) content. For
         each file or directory met, the appropriate filesystem database entry
         will be created or updated according to local copy.
+
+        The targets argument may be either a string, a dictionary of special
+        struct, or a list of string or dictionaries. In the former case, all
+        the elements of the list will be treated in order. The string target
+        has to refer to one of the entries given in `locations' dict.
         """
     }
 
@@ -257,33 +310,54 @@ class IndexDirectory( Stage ):
 
     # nstages=1, stageNum=1, results=[]
     def _V_call(self
-                , directory=None
+                , targets=[]
+                , locations={}
                 , backends={}
                 , syncFields=[]
                 , maxNewFiles=0
                 , noCommit=False
                 , reporter=None ):
-        if directory is None:
-            raise RuntimeError( 'Keyword argument directory= is mandatory'
-                    'for this stage.' )
-        backend = None
-        pdURI = urlparse( directory['folder'] )
-        if '' == pdURI.scheme or 'file' == pdURI.scheme:
-            backend = backends['file']
-        elif 'castor' == pdURI.scheme:
-            backend = backends['castor']
-        else:
-            raise RuntimeError( "Can not determine backend for URI: \"%s\" (scheme \"%s\")"%(
-                        directory['folder'][0], pdURI.scheme) )
-        gLogger.info( 'Performing cache syncing procedure for '
-                'attributes: %s.'%(', '.join(syncFields)) )
+        if type(targets) is str \
+        or type(targets) is dict:
+            targets = [targets]
+        for t in targets:
+            if type( t ) is str:
+                gLogger.info( 'Retrieving directory structure from aliased target "%s"...'%t )
+                t = locations[t]
+            else:
+                gLogger.info( 'Retrieving directory structure from direct target "%s"...'%t['URI'] )
+            lists = discover_entries( t, backends=backends )
+            backend = None
+            pdURI = urlparse( lists['folder'] )
+            try:
+                backend = backends[pdURI.scheme or 'file']
+            except KeyError:
+                raise RuntimeError( 'Target "%s" requires backend "%s" that is '
+                        'unknown or disabled.'%( t['URI'], pdURI.scheme or 'file' ) )
+            self._index_target( lists
+                              , backend
+                              , syncFields=syncFields
+                              , maxNewFiles=maxNewFiles
+                              , noCommit=noCommit
+                              , reporter=reporter )
+
+    def _index_target(self
+                , lists
+                , backend
+                , syncFields=[]
+                , maxNewFiles=0
+                , noCommit=False
+                , reporter=None ):
+        gLogger.info( 'Synchronizing cache for attributes: %s.'%(', '.join(syncFields)) )
         if maxNewFiles > 0:
             gLogger.warning('The "maxNewFiles" limit is set! Only %d new '
                     'files may be introduced during the '
                     'single stage evaluation.'%maxNewFiles )
-        fe, rep = index_directory( directory, backend, parent=None,
-                                            syncFields=syncFields,
-                                            maxNewFiles=maxNewFiles,
-                                            reporter=reporter )
-        gLogger.info( 'Sync stage stats: %s.'%( rep ) )
+        fe, rep = index_directory( lists
+                                 , backend
+                                 , parent=None
+                                 , syncFields=syncFields
+                                 , maxNewFiles=maxNewFiles
+                                 , reporter=reporter )
+        gLogger.info( 'Cache updating statistics: %s.'%( rep ) )
 

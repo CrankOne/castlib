@@ -26,7 +26,7 @@ from castlib3.shell import invoke_util
 from urlparse import urlparse, urlunparse
 from urllib import urlencode
 from castlib3.logs import gLogger
-import requests, fnmatch, datetime
+import requests, fnmatch, datetime, json
 
 class EOSBackend(AbstractBackend):
     __metaclass__ = BackendMetaclass
@@ -36,7 +36,7 @@ class EOSBackend(AbstractBackend):
 
     def __init__(self
                 , eosNetLoc='eospublic.cern.ch'
-                , eosPath='/proc/user'  # may be '/proc/admin' for some operations as well?
+                , eosPath='/proc/user/'  # may be '/proc/admin' for some operations as well?
                 , ruid=0, rgid=0
                 , format_='json' ):
         self.eosNetLoc = eosNetLoc
@@ -47,7 +47,7 @@ class EOSBackend(AbstractBackend):
 
     def _run_cmd_on_path_REST(self, filePath, cmd):
         qs = urlencode({ 'mgm.cmd' : cmd
-                    , 'mgm.path' : filePath
+                    , 'mgm.path' : urlparse(filePath).path if ':/' in filePath else filePath
                     , 'mgm.ruid' : self.ruid
                     , 'mgm.rgid' : self.rgid
                     , 'mgm.format' : self.format_
@@ -59,128 +59,104 @@ class EOSBackend(AbstractBackend):
                         , qs                # query
                         , ''                # fragment
             ))
-        return requests.get( uri ).json()
+        #print('xxx: %s'%uri)  # xxx
+        ret = requests.get( uri ).json()
+        if 'retc' in ret.keys() and 0 != ret['retc']:
+            raise RuntimeError( 'Query: %s. REST error (%r): %s'%(
+                uri, ret['retc'], ret['errormsg']) )
+        return ret
 
     def get_adler32(self, path):
-        pass
+        fInfo = self._run_cmd_on_path_REST( path, 'fileinfo' )
+        if 'checksumtype' not in fInfo.keys() \
+                or 'checksumvalue' not in fInfo.keys():
+            raise RuntimeError( 'REST response does not contain checksum.' )
+        if fInfo['checksumtype'] != 'adler':
+            raise RuntimeError( 'REST response does not contain adler32 '
+                    'checksum (type is "%s").'%fInfo['checksumtype'] )
+        return fInfo["checksumvalue"]
 
     def get_permissions(self, path):
-        raise NotImplementedError()
+        raise NotImplementedError('Permissions management is not yet implemented (EOS).')  # EOS-mod
 
     def get_size(self, path):
-        lpp = urlparse(path)
-        return int(invoke_util( 'nsls-dir'
-                              , dirPath=lpp.path
-                              , regexToApply=rxNSLS)[0]['fileSize'])
+        fInfo = self._run_cmd_on_path_REST( path, 'fileinfo' )
+        if 'size' not in fInfo.keys():
+            raise RuntimeError( 'REST response does not contain size value.' )
+        return fInfo["size"]
     
     def get_modified(self, path):
-        rfsOut = invoke_util( 'rfstat', remotePath=urlparse(path).path )[1]
-        r = obtain_rfstat_timestamps( rfsOut )['modTimestamp']
-        return datetime.datetime.fromtimestamp(r)
+        fInfo = self._run_cmd_on_path_REST( path, 'fileinfo' )
+        if 'mtime' not in fInfo.keys():
+            raise RuntimeError( 'REST response does not contain modified timestamp.' )
+        return datetime.datetime.fromtimestamp(fInfo["mtime"])
 
     def set_modified(self, path, dtObject):
-        lpp = urlparse(path)
-        return invoke_util( 'updtstamp'
-                              , key='m'
-                              , timestamp=dtObject.strftime('%Y%m%d%H%M')
-                              , hsmDestFile=lpp.path )
+        raise NotImplementedError('Modification of EOS data is not yet implemented within back-end.')
 
     def listdir(self, path):
-        lpp = urlparse(path)
-        return map( lambda e: e['filename'],
-                invoke_util( 'nsls'
-                            , timeout='long'
-                            , remotePath=lpp.path
-                            , regexToApply=rxNSLS) )
+        """
+        EOS may return a HUGE data object (~16MB for 2e4 entries) that may take
+        a lot of system resources to be processed.
+        """
+        dInfo = self._run_cmd_on_path_REST( path, 'fileinfo' )
+        if 'children' not in dInfo.keys():
+            raise RuntimeError( 'REST response does not contain children (is it a dir?).' )
+        namesLst = map( lambda e: e['name'], dInfo['children'] )
 
     def isfile(self, path):
-        lpp = urlparse(path)
-        fb = invoke_util( 'nsls-dir'
-                        , dirPath=lpp.path
-                        , regexToApply=rxNSLS)['mode'][0][0]
-        return '-' == fb or 'm' == fb
+        """
+        TODO: find a better way.
+        """
+        dInfo = self._run_cmd_on_path_REST( path, 'fileinfo' )
+        return 'nndirectories' not in dInfo.keys()
 
     def isdir(self, path):
-        lpp = urlparse(path)
-        fb = invoke_util( 'nsls-dir'
-                        , dirPath=lpp.path
-                        , regexToApply=rxNSLS)['mode'][0][0]
-        return 'd' == fb
+        """
+        TODO: find a better way.
+        """
+        dInfo = self._run_cmd_on_path_REST( path, 'fileinfo' )
+        return 'nndirectories' in dInfo.keys()
 
     def islink(self, path):
-        fb = invoke_util( 'nsls-dir'
-                        , dirPath=path
-                        , regexToApply=rxNSLS)['mode'][0][0]
-        return 'l' == fb
+        raise NotImplementedError('Querying a symlink at EOS data is not yet implemented within back-end.')
 
     def del_file(self, path):
-        lpp = urlparse(path)
-        return invoke_util('nsrmFile', hsmFile=lpp.path)
+        raise NotImplementedError('File deletion is not yet implemented (EOS).')  # EOS-mod
 
     def cpy_file(self, srcURI, dstURI, backends={} ):
-        srcLPP = urlparse(srcURI)
-        dstLPP = urlparse(dstURI)
-        if srcLPP.scheme != 'file' and srcLPP.scheme != '':
-            # todo: use self.tmpDir
-            raise NotImplementedError('CASTOR backend currently does not '
-                    'support copy from locations other than local.')
-        assert( dstLPP.scheme == 'castor' )
-        # The xrdcp expects URI being in other form that declared by RFC1630
-        # for CASTOR resource:
-        # - the actual scheme must be `root', not `castor'
-        # - the (absolute) path has to start from one extra dash symbol after
-        # host identifier. Example:
-        #   root://castorpublic.cern.ch//castor/cern.ch/na64/data/cdr/
-        dstURImod = urlunparse( ( 'root'                # scheme
-                                , self.castorNetLoc     # netloc
-                                , '/' + dstLPP.path     # path
-                                , '', '', ''            # params, query, fragment
-                                ) )
-        return invoke_util( 'xrdcp'
-                          , srcURI=srcURI
-                          , dstURI=dstURImod
-                          , timeout='long' )
+        raise NotImplementedError('File copying is not yet implemented (EOS).')  # EOS-mod
 
     def get_dir_content(self, uri, onlyPats=None, ignorePats=None, extra={} ):
-        # Get list of all files and sub-directories in current dir
-        ppl = urlparse(uri)
-        entries = invoke_util('nsls', timeout='long', remotePath=ppl.path, regexToApply=rxNSLS)
-        gLogger.debug('Acquired contents list of "%s".'%ppl.path)
-        # Get rid from the logically deleted files and symlinks. The only types
-        # to remain is files and directories: '-', 'm' and 'd'.
-        entries = filter( lambda e: e['mode'][0] in 'md-', entries )
-        if onlyPats:
-            if type(onlyPats) is str:
-                onlyPats = [onlyPats,]
-            contentLst_ = []
-            for wcard in onlyPats:
-                contentLst_.extend(
-                    filter(
-                        lambda e: fnmatch.fnmatch(e['filename'], wcard), 
-                        entries ) )
-            entries = contentLst_
-        if ignorePats:
-            if type(ignorePats) is str:
-                ignorePats = [ignorePats,]
-            for wcard in ignorePats:
-                entries = list(filter( lambda e: \
-                                    not fnmatch.fnmatch(e['filename'], wcard), entries ))
-        files = filter( lambda e: e['mode'][0] in '-m', entries )
-        subds = filter( lambda e: e['mode'][0] == '', entries )
+        dInfo = self._run_cmd_on_path_REST( uri, 'fileinfo' )
         ret = {
-            'folder' : uri,
-            'files' : map( lambda e: e['filename'], files ),
-            'subFolders' : []
-        }
+                'folder' : uri,
+                'modified' : datetime.datetime.fromtimestamp(dInfo['mtime']),
+                'files' : {},
+                'subFolders' : []
+            }
+        subds = []
+        for e in dInfo['children']:
+            if 'xattr' not in e.keys():  # that's a file
+                ret['files'][e['name']] = {
+                            'size' : e['size'],
+                            'modified' : datetime.datetime.fromtimestamp(e['mtime']),
+                        }
+                if 'adler' == e['checksumtype']:
+                    ret['files'][e['name']]['adler32'] = e['checksumvalue']
+            else:  # that's a dir
+                subds.append( e['name'] )
         for subd in subds:
             subd = subd['filename']
             ret['subFolders'].append(
-                            self.get_dir_content( self.uri_from_path( os.path.join(dirPath, subd)),
-                                        onlyPats=onlyPats, ignorePats=ignorePats) )
+                    self.get_dir_content( self.uri_from_path( os.path.join(dirPath, subd)),
+                                        onlyPats=onlyPats,
+                                        ignorePats=ignorePats ) )
         ret.update(extra)
         return ret
 
     def uri_from_path(self, path):
-        return 'castor://' + path
+        lpp = urlparse( path )
+        return 'eos://' + lpp.path
 
 

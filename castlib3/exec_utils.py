@@ -25,7 +25,7 @@ from __future__ import print_function
 Various auxilliary subroutines ususally used by executable code.
 """
 
-import os
+import os, dpath
 from castlib3.logs import gLogger
 from urlparse import urlparse
 
@@ -47,14 +47,6 @@ try:
 except ImportError:
     import yaml
 
-#@event.listens_for(Engine, "connect")
-#def set_sqlite_pragma(dbapi_connection, connection_record):
-#    cursor = dbapi_connection.cursor()
-#    cursor.execute("pragma journal_mode=OFF")
-#    cursor.execute("pragma synchronous=OFF")
-#    cursor.execute("pragma cache_size=100000")
-#    cursor.close()
-
 def initialize_database( engineCreateArgs,
                          engineCreateKWargs={},
                          autocommit=False,
@@ -75,6 +67,7 @@ def initialize_database( engineCreateArgs,
     DB.set_session(dbS)
     DeclBase.metadata.create_all(engine)
 
+
 def initialize_backends( schemes, cfg ):
     backends = {}
     for scheme in schemes:
@@ -84,6 +77,7 @@ def initialize_backends( schemes, cfg ):
             else:
                 backends[scheme] = gCastlibBackends[scheme]()
     return backends
+
 
 def ordered_load(stream, Loader=yaml.Loader, object_pairs_hook=OrderedDict):
     """
@@ -99,6 +93,7 @@ def ordered_load(stream, Loader=yaml.Loader, object_pairs_hook=OrderedDict):
         yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
         construct_mapping)
     return yaml.load(stream, OrderedLoader)
+
 
 def discover_locations(locs):
     """
@@ -126,7 +121,16 @@ def discover_locations(locs):
                 'supported yet.')
     return directories
 
-def process_stages( stages, directories=None, noCommit=False, backends={}, reporter=None ):
+
+def process_stages( stages
+                  , directories=None
+                  , noCommit=False
+                  , backends={}
+                  , reporter=None ):
+    """
+    Generic processing loop performing the processing using the given pipeline.
+    XXX: deprecated
+    """
     externalModules = stages.get('external-import', None)
     if externalModules:
         gLogger.info('Loading %d external import...'%len(externalModules))
@@ -144,4 +148,164 @@ def process_stages( stages, directories=None, noCommit=False, backends={}, repor
         # parameter
         stages( noCommit=noCommit, backends=backends, reporter=reporter )
     return True  # TODO: used by external loop in listening mode
+
+
+class TaskRegistry(object):
+    """
+    This object stores the index of pre-defined stages located in directories.
+    Stores the known stages as a dictionary in following form:
+        <task-label> : (<YAML-file-path>, <description>)
+    """
+    def __init__(self
+                , paths=[] ):
+        self.paths = paths
+        self._knownTasks = {}
+
+    def _discover_tasks(self):
+        """
+        Performs recursive lookup for available tasks, renewing the related
+        information.
+        """
+        nStagesDiscovered = 0
+        for path in self.paths:
+            if not path:
+                continue
+            subdirs = []
+            for e in os.listdir(path):
+                ePath = os.path.join(path, e)
+                if os.path.isfile(ePath) and ( ePath.endswith('.yml') \
+                                            or ePath.endswith('.yaml') ):
+                    # Probably a stage file to be tracked
+                    if self._cache_task_info(ePath):
+                        nStagesDiscovered += 1
+                elif os.path.isdir( ePath ):
+                    nStagesDiscovered += self._discover_tasks( ePath )
+        return nStagesDiscovered
+
+    def _cache_task_info(self, path):
+        """
+        Will retrieve some info from YAML file and cache its path if it has the
+        `stages' element. Will also try to extract the comment from the
+        stages file.
+        """
+        with open(path) as f:
+            taskContent = ordered_load(f)
+        if taskContent.get('stages', None):
+            taskDescription = taskContent.get('comment', '<description not available>')
+            taskName = taskContent.get('label', None)
+            if not taskName:
+                taskName = os.path.splitext(os.path.basename(path))[0]
+            taskName = self._get_unique_task_name_for( taskName )
+            self._knownTasks[taskName] = ( path, taskDescription )
+            return True
+        return False
+
+    def _get_unique_task_name_for( self, taskName ):
+        """
+        Forms unique name for pipeline according to the rules:
+            - will return '<taskName>' if it was not used by any entry
+            (i.e. is already unique) AND if there was no entry '<taskName>-1'.
+            - will return '<taskName>-2' AND change the existing '<taskName>'
+            key to '<taskName>-1' if there was one with name '<taskName>'.
+            - will return '<taskName>-<n+1>' if all the names '<taskName>-<n>'
+            were already taken by some entries.
+        Appears to be a complication. One shall to, may be, re-think this part.
+        """
+        existingSingle = self._knownTasks.get( taskName, None )
+        existingMultiple = self._knownTasks.get( taskName + '-1', None )
+        if existingSingle is None and existingMultiple is None:
+            gLogger.debug( 'Task name "%s" is unique.'%taskName )
+            # Name is already unique, or corresponds to an empty object.
+            return taskName
+        elif existingSingle is not None and existingMultiple is None:
+            self._knownTasks['%s-1'%taskName] = existingSingle
+            del self._knownTasks[taskName]
+            gLogger.debug( 'Task name "%s" is duplicating. '
+                    'Existing renamed to "%s-1", "%s-2" is proposed.'%(
+                        taskName, taskName, taskName) )
+            return '%s-2'%taskName
+        elif existingSingle is not None and existingMultiple is not None:
+            raise RuntimeError('Bad state.')  # shall never happend
+        #elif existingSingle is None and existingMultiple is not None:
+        n = 1 if existingMultiple else 0
+        newTaskName = '%s-%d'%(taskName, n)
+        while newTaskName in self._knownTasks.keys():
+            n += 1
+        gLogger.debug( 'Task name "%s" is duplicating. '
+                    '"%s" is proposed.'%( taskName, newTaskName ) )
+        return newTaskName
+
+    @property
+    def predefined_tasks( self ):
+        return self._knownTasks
+
+    def reload_tasks( self ):
+        self._knownTasks = {}
+        self._discover_tasks()
+
+    def __getitem__(self, key):
+        return self.get_task(key)
+
+    def get_task(self, key):
+        fPath = self._knownTasks[key][0]
+        with open(fPath) as f:
+            task = ordered_load(f)
+        return key
+        #for oe in override:
+        #    k, v = oe
+        #    for dpath.set( task, k, v )
+        #return Stages( task['stages'] )
+
+def execute_task( taskDescr
+                , omitStages=[]
+                , onlyStages=[]
+                , reporter=None
+                , backends={}
+                , locations={} ):
+    if omitStages and onlyStages:
+        raise RuntimeError( 'Both, omitStages and onlyStages arguments are '
+                'given.' )
+    # Omit stages:
+    for k in omitStages:
+        if k in taskDescr['stages'].keys():
+            del taskDescr['stages'][k]
+        else:
+            gLogger.warning( 'No stages "%s" defined by task (can not be '
+                'omitted).'%k )
+    # Only stages:
+    onlyStages = OrderedDict()  # TODO: XXX
+    for k in onlyStages:
+        if k in taskDescr['stages'].keys():
+            onlyStages[k] = taskDescr['stages'][k]
+        else:
+            gLogger.warning( 'No stages "%s" defined by task (can not be '
+                'included as "only" argument).'%k )
+    if onlyStages:
+        taskDescr['stages'] = onlyStages
+    # Process:
+    stages = Stages( taskDescr['stages'] )
+    return stages( noCommit=taskDescr.get('no-commit', False)
+                 , backends=backends
+                 , reporter=reporter
+                 , locations=locations )
+
+
+def configure_cstl3( co
+                , disabledBackends=[]
+                , disabledLocations=[]
+             ):
+    backends = initialize_backends(
+            filter( lambda e: e not in disabledBackends, co['backends'].keys() ),
+            co['backends'] )
+    #
+    # Explicitly initialize database, if database config was provided within
+    # config object:
+    initialize_database( co['database'].pop('\\args'),
+                         engineCreateKWargs=co['database'] )
+    #
+    # Disable locations if needed.
+    for loc in disabledLocations:
+        if loc in co['locations'].keys():
+            del co['locations'][loc]
+    return co, backends
 
