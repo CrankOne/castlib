@@ -82,14 +82,14 @@ def discover_entries( dirListPrescript, backends={} ):
     """
     # Traverse directories content, forming the list without directories
     # resolution:
-    uri = dirListPrescript.pop('URI')
+    uri = dirListPrescript.get('URI')
     lpp = urlparse(uri)
     backend = backends[lpp.scheme or 'file']
     gLogger.info( 'Listing contents of directory %s...'%(uri) )
     dirContent = backend.get_dir_content(
             uri,
-            onlyPats=dirListPrescript.pop('only', None),
-            ignorePats=dirListPrescript.pop('ignore', None),
+            onlyPats=dirListPrescript.get('only', None),
+            ignorePats=dirListPrescript.get('ignore', None),
             extra=dirListPrescript
         )
     if lpp.netloc:

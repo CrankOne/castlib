@@ -32,7 +32,7 @@ from castlib3.logs import gLogger
 from castlib3 import dbShim as DB
 from urlparse import urlparse, urlunparse
 
-from castlib3.rpc import ReportingBar
+from castlib3.rpc.simple import ReportingBar
 
 class Sync( Stage ):
     __metaclass__ = StageMetaclass

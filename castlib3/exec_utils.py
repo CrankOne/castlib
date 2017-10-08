@@ -149,7 +149,6 @@ def process_stages( stages
         stages( noCommit=noCommit, backends=backends, reporter=reporter )
     return True  # TODO: used by external loop in listening mode
 
-
 class TaskRegistry(object):
     """
     This object stores the index of pre-defined stages located in directories.
@@ -160,17 +159,22 @@ class TaskRegistry(object):
                 , paths=[] ):
         self.paths = paths
         self._knownTasks = {}
+        self._discover_tasks( self.paths )
 
-    def _discover_tasks(self):
+    def _discover_tasks(self, dPaths ):
         """
         Performs recursive lookup for available tasks, renewing the related
         information.
         """
         nStagesDiscovered = 0
-        for path in self.paths:
+        for path in dPaths:
             if not path:
                 continue
             subdirs = []
+            if not os.path.exists( path ) \
+            or not os.path.isdir(path):
+                gLogger.info( 'Omitting non-existing directory path "%s".'%path )
+                continue
             for e in os.listdir(path):
                 ePath = os.path.join(path, e)
                 if os.path.isfile(ePath) and ( ePath.endswith('.yml') \
@@ -236,7 +240,7 @@ class TaskRegistry(object):
         return newTaskName
 
     @property
-    def predefined_tasks( self ):
+    def predefinedTasks( self ):
         return self._knownTasks
 
     def reload_tasks( self ):
@@ -284,10 +288,12 @@ def execute_task( taskDescr
         taskDescr['stages'] = onlyStages
     # Process:
     stages = Stages( taskDescr['stages'] )
-    return stages( noCommit=taskDescr.get('no-commit', False)
+    ret = stages( noCommit=taskDescr.get('no-commit', False)
                  , backends=backends
                  , reporter=reporter
                  , locations=locations )
+    del stages
+    return ret
 
 
 def configure_cstl3( co
@@ -307,5 +313,6 @@ def configure_cstl3( co
     for loc in disabledLocations:
         if loc in co['locations'].keys():
             del co['locations'][loc]
-    return co, backends
+
+    return co, backends, TaskRegistry( paths=co['tasks-locations'] )
 

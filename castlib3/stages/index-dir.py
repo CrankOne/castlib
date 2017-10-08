@@ -33,7 +33,7 @@ from sqlalchemy.orm.exc import MultipleResultsFound
 from os import path as P
 from urlparse import urlparse
 
-from castlib3.rpc import ReportingBar
+from castlib3.rpc.simple import ReportingBar
 
 class Stats(object):
     """

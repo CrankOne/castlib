@@ -26,16 +26,18 @@ import sys, ctypes, imp, re
 reload(sys)
 sys.setdefaultencoding('UTF8')
 
-import argparse, yaml, os, pprint, importlib, pprint, socket
+import argparse, yaml, os, pprint, importlib, pprint, socket, json
 from urlparse import urlparse
 from collections import OrderedDict
+
+from mem_top import mem_top
 
 from castlib3.filesystem import discover_entries
 from castlib3.logs import gLogger
 from castlib3.backend import LocalBackend
 from castlib3.castor.backend import CASTORBackend
 from castlib3.eos.backend import EOSBackend
-from castlib3.rpc import recieve_stages, Reporter
+from castlib3.rpc.reporter import Reporter
 from castlib3.exec_utils import configure_cstl3, \
                                 ordered_load, \
                                 execute_task
@@ -111,6 +113,10 @@ if '__main__' == __name__:
                 "in order." )
     #
     actionG = p.add_mutually_exclusive_group(required=True)
+    actionG.add_argument('--list-tasks'
+                , action='store_true'
+                , help="Will print available tasks discovered within "
+                "tasks-locations paths.")
     actionG.add_argument('--list-stages'
                 , action='store_true'
                 , help="Will print available stages and terminate the script.")
@@ -122,6 +128,12 @@ if '__main__' == __name__:
                 , help="A YAML file describing the task to be performed. "
                 "Represented by a YAML file assembling one or more stages "
                 "into processing pipeline." )
+    actionG.add_argument('--task'
+                , type=str
+                , help="Runs a task described in stages file in one of the "
+                "directories that shall be considered as a system ones. This "
+                "mode is pretty similar to --stages-file, but uses internal "
+                "tasks registry.")
     actionG.add_argument('--listen'
                 , type=str
                 , help="Runs script in listening mode. Opens a socket on with "
@@ -163,19 +175,34 @@ if '__main__' == __name__:
                 gLogger.info('Loading python module %s...'%(m))
                 try:
                     gExtModules[m] = importlib.import_module(m, package='castlib3')
-                except ImportError:
+                except ImportError as e1:
                     gLogger.info( 'Direct import of "%s" failed. '
                             'Assuming CWD as location.'%m )
                     sys.path.insert(0, os.path.abspath('.'))
-                    gExtModules[m] = __import__(m)
+                    try:
+                        gExtModules[m] = __import__(m)
+                    except ImportError as e2:
+                        gLogger.error( 'Importing with CWD failed as well. '
+                                'Dumping first failure report:' )
+                        gLogger.exception( e1 )
+                        raise
+                    gLogger.info( 'Import of "%s" module succeeded.'%m )
             else:
                 gLogger.warning('Omitting repeatative import of %s.'%m)
 
-    gConfig, backends = configure_cstl3( gConfig
+    gConfig, backends, tr = configure_cstl3( gConfig
                    , disabledBackends=(args.disable_backend or [])
                    , disabledLocations=(args.disable_location or []) )
 
-    # ... whatever?
+    if args.list_tasks:
+        if not tr.predefinedTasks:
+            print( 'No predefined tasks available.' )
+            sys.exit(0)
+        print('List of pre-defined tasks:')
+        for name, dp in tr.predefinedTasks.iteritems():
+            tLoc, tDescr = dp
+            print( " \"\033[1m%s\033[0m\" (at %s): %s"%( name, tLoc, tDescr ) )
+        sys.exit(0)
 
     if args.stages_file:
         # Parse stages list:
@@ -189,9 +216,19 @@ if '__main__' == __name__:
         #process_stages( stagesDescription
         #              , noCommit=args.no_commit
         #              , backends=backends )
+    elif args.task:
+        #with args.stages_file as f:
+        #    task = ordered_load(f)
+        execute_task( task
+                    , omitStages=(args.omit or [])
+                    , onlyStages=(args.only or [])
+                    , backends=backends
+                    , locations=gConfig['locations'] )
     elif args.listen:
         addr, port = args.listen.split(':')
-        reporter = Reporter(srvAddr=addr, portNo=int(port))
+        reporter = Reporter( taskRegistry=tr 
+                           , srvAddr=addr
+                           , portNo=int(port) )
         reporter.start()
         reporter.stagesCV.acquire()
         try:
@@ -206,11 +243,15 @@ if '__main__' == __name__:
                     # blocks main thread from receiving the system signals.
                     reporter.stagesCV.wait(timeout=300)
                     reporter.workState = 'Busy.'
+                gLogger.info(mem_top())  # XXX
+                stgsDescr = reporter.take_stages()
                 gLogger.debug( 'Main thread busy.' )
-                doRun = process_stages( reporter.stages
-                              , noCommit=args.no_commit
+                gLogger.info('Accepted following task '
+                        'description: %s'%json.dumps( stgsDescr, indent=2 ))
+                doRun = execute_task( stgsDescr
+                              , reporter=reporter
                               , backends=backends
-                              , reporter=reporter )
+                              , locations=gConfig['locations'] )
                 gLogger.debug( 'Main has been finished stages.' )
         finally:
             reporter.stagesCV.release()
