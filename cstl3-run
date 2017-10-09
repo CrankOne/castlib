@@ -26,7 +26,7 @@ import sys, ctypes, imp, re
 reload(sys)
 sys.setdefaultencoding('UTF8')
 
-import argparse, yaml, os, pprint, importlib, pprint, socket, json
+import argparse, yaml, os, pprint, importlib, pprint, socket, json, gc
 from urlparse import urlparse
 from collections import OrderedDict
 
@@ -228,7 +228,8 @@ if '__main__' == __name__:
         addr, port = args.listen.split(':')
         reporter = Reporter( taskRegistry=tr 
                            , srvAddr=addr
-                           , portNo=int(port) )
+                           , portNo=int(port)
+                           , disabledViews=gConfig['disabled-views'] )
         reporter.start()
         reporter.stagesCV.acquire()
         try:
@@ -243,7 +244,7 @@ if '__main__' == __name__:
                     # blocks main thread from receiving the system signals.
                     reporter.stagesCV.wait(timeout=300)
                     reporter.workState = 'Busy.'
-                gLogger.info(mem_top())  # XXX
+                #gLogger.info(mem_top())  # XXX
                 stgsDescr = reporter.take_stages()
                 gLogger.debug( 'Main thread busy.' )
                 gLogger.info('Accepted following task '
@@ -252,6 +253,7 @@ if '__main__' == __name__:
                               , reporter=reporter
                               , backends=backends
                               , locations=gConfig['locations'] )
+                gc.collect()
                 gLogger.debug( 'Main has been finished stages.' )
         finally:
             reporter.stagesCV.release()

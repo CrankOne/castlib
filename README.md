@@ -39,6 +39,17 @@ location content against referential table, etc.
 
 ## Issues
 
+- For now, the major drawback of the CastLib3 package is the memory
+consumption. The package produces (apparently) few minor leaks (few Mbs per
+one stage invokation operating with 1e4 entries), but the main issue is the
+caching memory that is allocated by some system modules. This consumption makes
+reentrant usage incompatible with back-ends launching shell procedures using
+`Popen` calls since `fork()` call
+[tries to duplicate](https://stackoverflow.com/a/13329386/1734499) amount of
+memoy used. So the preferable usage is run it under the external launching
+managers/task brokers like [supervisord](http://supervisord.org/) or
+[celery](http://www.celeryproject.org/).
+
 - For developers, 13/09/017: Note about `sqlamp`.
 Both the CastLib3 and the sV-resources server use the
 [`sqlamp` package](https://bitbucket.org/angri/sqlamp) offering quite neat and

@@ -49,6 +49,7 @@ class Stage(object):
         self._defaultKWargs = dict(kwargs)
 
     def commit(self):
+        DB.session.flush()
         try:
             DB.session.commit()
         except DatabaseError:
@@ -168,6 +169,7 @@ class Stages(list):
                 gLogger.info( "Updating local caching database..." )
                 stageInstance.commit()
                 gLogger.info( "\033[1mLocal cache updated.\033[0m" )
+                DB.session.expire_all()
         return results
 
     def __str__(self):

@@ -245,16 +245,17 @@ class TaskRegistry(object):
 
     def reload_tasks( self ):
         self._knownTasks = {}
-        self._discover_tasks()
+        self._discover_tasks( self.paths )
 
     def __getitem__(self, key):
         return self.get_task(key)
 
     def get_task(self, key):
+        self.reload_tasks()
         fPath = self._knownTasks[key][0]
         with open(fPath) as f:
             task = ordered_load(f)
-        return key
+        return task
         #for oe in override:
         #    k, v = oe
         #    for dpath.set( task, k, v )

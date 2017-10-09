@@ -41,6 +41,7 @@ class Reporter( threading.Thread ):
         srvAddr = kwargs.pop('srvAddr')
         portNo = kwargs.pop('portNo')
         self.tr = kwargs.pop('taskRegistry')
+        self.disabledViews = kwargs.pop('disabledViews', [])
         super(Reporter, self).__init__(*args, **kwargs)
         self.sock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
         self.sock.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -83,6 +84,9 @@ class Reporter( threading.Thread ):
                , 'errors' : [] }
         for k, v in data.iteritems():
             if k in gReportingViews.keys():
+                if k in self.disabledViews:
+                    resp['errors'].append('View "%s" is disabled.'%k)
+                    continue
                 try:
                     resp[k] = gReportingViews[k]( self, v )
                 except Exception as e:
@@ -108,7 +112,8 @@ def _reporter_view__list_views( reporter, data ):
     """
     ret = {}
     for k in gReportingViews.keys():
-        ret[k] = gReportingViews[k].__doc__
+        if k not in reporter.disabledViews:
+            ret[k] = gReportingViews[k].__doc__
     return ret
 
 gReportingViews['list-views'] = _reporter_view__list_views
@@ -204,9 +209,18 @@ gReportingViews['list-tasks'] = _reporter_view__list_tasks
 
 def _reporter_view__run_task( reporter, data ):
     """
-    Returns object (dict) listing available tasks.
+    Launches the pre-defined task.
     """
-    raise NotImplementedError( 'View is not yet implemented.' )
+    resp = {}
+    if reporter.stagesCV.acquire(blocking=0):
+        task = reporter.tr.get_task(data)
+        reporter.stages = {'stages':task['stages']}
+        reporter.stagesCV.notify_all()
+        reporter.stagesCV.release()
+        resp['stage-accepted-status'] = 'Accepted.'
+    else:
+        resp['stage-accepted-status'] = 'Denied (worker busy).'
+    return resp
 
 gReportingViews['run-task'] = _reporter_view__run_task
 

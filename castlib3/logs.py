@@ -61,7 +61,7 @@ formatter = logging.Formatter('%(name)s/%(levelname)s: %(message)s')
 sh.setFormatter(formatter)
 
 ch = logging.FileHandler('/tmp/castlib.log' )
-ch.setLevel( logging.DEBUG )
+ch.setLevel( logging.INFO )
 
 # create formatter
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
