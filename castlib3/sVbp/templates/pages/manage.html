@@ -1,4 +1,4 @@
-{% extends 'layouts/main.html' %}
+{% extends 'layouts/tree.html' %}
 {% block title %}CastLib management{% endblock %}
 {% block suppHeadContent %}
     <script src="/static/js/libs/nodedump-client-min.js"></script>
@@ -25,8 +25,25 @@ major purpose is to perform filesystem synchronisation with
 used as a standalone util to offer unified data and metadata access via REST
 API of StromaV resources server.</p>
 
-<h2>Available Stages</h2>
-<p>Below is the lists of predefined stages available on this resources server
+<h2>Available Instances</h2>
+
+<p>Below are the list of running instances with lists of their locations
+and tasks available on them.</p>
+
+<div class="treeBrowser">
+  <div class="zTreeWrapper">
+    <ul id="indexesList-1" class="ztree"></ul>
+  </div>
+  <div class="treeBrowserDetails">
+    <h4>Details</h4>
+    <div class="treeBrowserDetailsContent" id="tree-element-details-1">
+    <p>Select an item in the left panel to see its details here.</p>
+    </div>
+  </div>
+</div>
+
+<h2>Available Stages on Current Instance</h2>
+<p>Below is the list of predefined stages available on this resources server
 instance. They're merely a <code>.yaml</code> files steering CastLib pipeline
 to achieve particular functions. Some of them may be ran or scheduled as is,
 others may require additional permissions from user to be performed.</p>

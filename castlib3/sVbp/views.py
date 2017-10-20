@@ -29,7 +29,8 @@ from collections import OrderedDict
 
 from castlib3.logs import gLogger
 from castlib3.models.filesystem import Folder, File, FSEntry
-from castlib3.exec_utils import initialize_database, ordered_load, discover_locations
+from castlib3.exec_utils import TaskRegistry
+from castlib3.rpc.mngr_super import WorkerManager_Supervisord
 
 import sVresources.db.instance
 from sVresources import apps, yaml
@@ -42,71 +43,53 @@ bp = Blueprint('cstl3', __name__,
                static_folder='static',
                url_prefix='/rawstat')
 
-gAvailableTasks = {}
+# Expected to be an instance of CastLib3.exec_utils.TaskRegistry.
+# Set by configure().
+gTaskRegistry = None
+# Expected to be a dict of tuples. Names refers to particular hosts and tuples 
+# contain number of ports. Set by configure().
+gCstlNodes = {}
 
-def ordered_load(stream, Loader=yaml.Loader, object_pairs_hook=OrderedDict):
-    class OrderedLoader(Loader):
-        pass
-    def construct_mapping(loader, node):
-        loader.flatten_mapping(node)
-        return object_pairs_hook(loader.construct_pairs(node))
-    OrderedLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-        construct_mapping)
-    return yaml.load(stream, OrderedLoader)
-
-def append_tasks_dict( dct, key, content ):
-    existingSingle = dct.get(key, None)
-    existingMultiple = dct.get(key + '-1', None)
-    if not (existingSingle or existingMultiple):
-        dct[key] = content
-        return
-    # Task with similar name exists. Re-insert it incrementing index by one.
-    if existingSingle:
-        dct.pop(key)
-        dct[key + '-1'] = existingSingle
-        dct[key + '-2'] = content
-        return
-    # Multiple tasks with similar name:
-    latestIdx = int(key.split('-')[-1:]) + 1
-    dct[key + '_%d'%latestIdx] = content
-
-def discover_stages( path ):
-    ret = {}
-    if not path:
-        return ret
-    subdirs = []
-    for e in os.listdir(path):
-        ePath = os.path.join( path, e )
-        if os.path.isfile( ePath ) and re.match( "^.+\.yml$", e ):
-            taskName = e[:-4]
-            taskContent = None
-            with open(ePath) as f:
-                taskContent = ordered_load(f)
-            if taskContent.get('stages', None):
-                taskContent['_location'] = ePath
-                append_tasks_dict( ret, taskName, taskContent )
-        elif os.path.isdir( ePath ):
-            subdirs.append( ePath )
-    for e in subdirs:
-        sRet = discover_stages( e )
-        ret.update(sRet)
-    return ret
+gWorkersMgmtBackends = {}
 
 def configure( *args, **kwargs ):
-    tasksCatalogues=kwargs.get( 'cstlStagesDirs', None )
+    global gTaskRegistry
+    global gCstlNodes
+    global gWorkersMgmtBackends
+    tasksCatalogues = kwargs.get( 'task-dirs', None )
+    nodesList = kwargs.get('nodes', {})
     if tasksCatalogues is not None:
-        for e in tasksCatalogues:
-            if os.path.exists(e) and os.path.isdir(e):
-                gAvailableTasks.update( discover_stages( e ) )
-                gLogger.info( "%d CastLib tasks have been discovered in \"%s\""%(
-                                        len(gAvailableTasks), e) )
-            else:
-                gLogger.warning( 'Path "%s" is not reachable or does not refer '
-                    'to a directory. Can not extract CastLib tasks from '
-                    'there.'%e )
+        gTaskRegistry = TaskRegistry( paths=tasksCatalogues )
+        gLogger.info( "CastLib's TaskRegistry has discovered %d tasks for "
+                "current instance."%len(gTaskRegistry.predefinedTasks) )
     else:
         gLogger.warning( "No \"cstlStagesDirs\" parameter is given." )
+    if nodesList is not None:
+        gCstlNodes = nodesList
+        for nodeName, nodeProvides in gCstlNodes.iteritems():
+            if 'supervisors' not in nodeProvides.keys():
+                continue
+            if type(nodeProvides) is not dict \
+            and type(nodeProvides) is not OrderedDict:
+                gLogger.error( 'Type of nodes:supervisors for node %s is %r, while '
+                        'expected is a dict or OrderedDict.'%(nodeName, type(nodeProvides)) )
+                continue
+            gWorkersMgmtBackends[nodeName] = {}
+            for spd in nodeProvides['supervisors']:
+                if 'supervisord' == spd['type']:
+                    gWorkersMgmtBackends[nodeName][spd['name']] = \
+                            WorkerManager_Supervisord( nodeName
+                                , int(spd['port'])
+                                , username=(spd.get('username', None))
+                                , password=(spd.get('password', None)) )
+                # else ...
+                else:
+                    gLogger.warning( 'Unknown/unimplemented supervisor '
+                            'type: "%s", on node "%s".'%(spd['type'], nodeName) )
+        gLogger.info( "CastLib management view has been set to track "
+                "%d nodes."%len(gCstlNodes) )
+    else:
+        gLogger.warning( "No \"cstlNodes\" parameter is given." )
 
 def follow_path( path ):
     folderEntry = apps.db.query(Folder).filter( Folder.name=='$root' ).first()
@@ -189,22 +172,145 @@ def folder_details():
         return {}, HTTP_STATUS_CODES.HTTP_404_NOT_FOUND
     return folderEntry.as_dict(), HTTP_STATUS_CODES.HTTP_200_OK
 
+#
+# Management
+
+@bp.route('/nodes/', methods=['GET'])
+def manage_cstl3():
+    extendedTasks = {}
+    if gTaskRegistry:
+        for k, v in gTaskRegistry.predefinedTasks:
+            extendedTasks[k] = {
+                          'comment' : v.get('comment', '<i>(No comment available.)</i>')
+                        , 'runnable' : v.get('runnable', False)
+                        , 'stagesJS' : json.dumps( v['stages'] )
+                        , 'fileLocation' : v['_location']
+                    }
+    return render_template( 'pages/manage.html'
+            , availableTasks=extendedTasks
+            , AJAXTreeAddr='nodes-ajax'
+            , AJAXGroupDetails=url_for('cstl3.node_overview')
+            , AJAXItemDetails=url_for('cstl3.node_item_details')
+            , AJAXParameters=['nodeName', 'portNo', 'shareName', 'category', 'sprvName', 'workerIndex']
+            , groupFields=['category', 'nodeName'] )
+
+@bp.route('/nodes/nodes-ajax', methods=['POST'])
+@expected_content_type
+def nodes_tree():
+    """
+    Returns castlib3 filesystem tree queries in form suitable for zTree.
+    """
+    category = request.form.get('category', None)
+    if category is None:
+        if not gCstlNodes:
+            return [], HTTP_STATUS_CODES.HTTP_200_OK  # no nodes configured
+        ret = []
+        for nodeName, ports in gCstlNodes.iteritems():
+            ret.append({
+                    'name' : nodeName,
+                    'isParent' : True,
+                    'nodeName' : nodeName,
+                    'category' : 'node'
+                })
+        return ret, HTTP_STATUS_CODES.HTTP_200_OK
+    nodeName = request.form.get('nodeName')
+    ret = []
+    if 'node' == category:
+        if nodeName not in gCstlNodes.keys():
+            return { 'error' : 'Has no such node: "%s".'%nodeName }, HTTP_STATUS_CODES.HTTP_400_BAD_REQUEST
+        if 'supervisors' in gCstlNodes[nodeName].keys():
+            ret.append( { 'name' : 'Supervisors'
+                        , 'isParent' : True
+                        , 'nodeName' : nodeName
+                        , 'category' : 'supervisors' } )
+        if 'workers' in gCstlNodes[nodeName].keys():
+            ret.append( { 'name' : 'Workers'
+                        , 'isParent' : True
+                        , 'nodeName' : nodeName
+                        , 'category' : 'workers' } )
+        if 'shares' in gCstlNodes[nodeName].keys():
+            ret.append( { 'name' : 'Shares'
+                        , 'isParent' : True
+                        , 'nodeName' : nodeName
+                        , 'category' : 'shares' } )
+        return ret, HTTP_STATUS_CODES.HTTP_200_OK
+    elif 'supervisors' == category:
+        for sprv in gCstlNodes[nodeName]['supervisors']:
+            ret.append( { 'name' : sprv['name']
+                        , 'nodeName' : nodeName
+                        , 'sprvName' : sprv['name']
+                        , 'category' : 'supervisor' } )
+        return ret, HTTP_STATUS_CODES.HTTP_200_OK
+    elif 'workers' == category:
+        for n, wrkr in enumerate(gCstlNodes[nodeName]['workers']):
+            ret.append( { 'name' : '%r'%wrkr['id']
+                        , 'workerIndex' : n
+                        , 'nodeName' : nodeName
+                        , 'category' : 'worker' } )
+        return ret, HTTP_STATUS_CODES.HTTP_200_OK
+    elif 'shares' == category:
+        # ...
+        return ret, HTTP_STATUS_CODES.HTTP_200_OK
+    return { 'error' : 'Unknown category: "%s".'%category }, HTTP_STATUS_CODES.HTTP_400_BAD_REQUEST
+
+@bp.route('/nodes/node_overview')
+@expected_content_type
+def node_overview():
+    nodeName = request.args.get('nodeName')  # .form ?
+    if nodeName not in gCstlNodes.keys():
+        return { 'error' : 'Has no such node: "%s".'%nodeName }, HTTP_STATUS_CODES.HTTP_400_BAD_REQUEST
+    # TODO: Find a better way?
+    isUp = True if 0 == os.system("ping -c 1 %s > /dev/null"%nodeName) else False
+    shares = gCstlNodes[nodeName].get('nfs-shares', {})
+    # ...
+    # TODO: Basically, we have to return generic information about host here.
+    # May be latency/traceroute may be useful for further utilization within
+    # balancers or task brokers. We have to cache this info as well.
+    return { 'isUp': isUp
+            , 'NFS-shares' : shares
+            , 'nodeName' : nodeName} \
+         , HTTP_STATUS_CODES.HTTP_200_OK
+
+@bp.route('/nodes/item_details')
+@expected_content_type
+def node_item_details():
+    ret = []
+    category = request.args.get('category', None)
+    nodeName = request.args.get('nodeName', None)
+    if nodeName is not None and nodeName not in gCstlNodes.keys():
+        return { 'error' : 'Has no such node: "%s".'%nodeName }, HTTP_STATUS_CODES.HTTP_400_BAD_REQUEST
+    if 'worker' == category:
+        workerIndex = request.args.get('workerIndex')
+        if workerIndex is None:
+            return { 'error' : 'Request did not submit worker num.' }, HTTP_STATUS_CODES.HTTP_400_BAD_REQUEST
+        workerIndex = int(workerIndex)
+        workerEntry = gCstlNodes[nodeName]['workers'][workerIndex]
+        manager = gWorkersMgmtBackends[nodeName].get( workerEntry['supervisor'], None )
+        if manager is None:
+            return { 'error' : 'Worker config entry %s[%d] refers to '
+                    'non-existing/unimplemented supervisor: "%s".'%(
+                            nodeName, workerIndex, workerEntry['supervisor'] ) } \
+                            , HTTP_STATUS_CODES.HTTP_400_BAD_REQUEST
+        
+        return manager.worker_status( gCstlNodes[nodeName]['workers'][workerIndex]['id'] ) \
+                , HTTP_STATUS_CODES.HTTP_200_OK
+    elif 'supervisor' == category:
+        supervisorName = request.args.get('sprvName')
+        try:
+            ret = gWorkersMgmtBackends[nodeName][supervisorName].status()
+        except Exception as e:
+            gLogger.exception(e)
+            return { 'available' : False, 'details' : str(e) }, HTTP_STATUS_CODES.HTTP_200_OK
+        if ret[0]:
+            return { 'available' : True, 'details' : ret[1] }, HTTP_STATUS_CODES.HTTP_200_OK
+        else:
+            return { 'available' : False, 'details' : None }, HTTP_STATUS_CODES.HTTP_200_OK
+    else:
+        return { 'error' : 'Unknown category: "%s".'%category }, HTTP_STATUS_CODES.HTTP_400_BAD_REQUEST
+    return ret, HTTP_STATUS_CODES.HTTP_200_OK
 
 #
 # Long-running operations
-
-@bp.route('/manage', methods=['GET'])
-def manage_cstl3():
-    extendedTasks = {}
-    for k, v in gAvailableTasks.iteritems():
-        extendedTasks[k] = {
-                      'comment' : v.get('comment', '<i>(No comment available.)</i>')
-                    , 'runnable' : v.get('runnable', False)
-                    , 'stagesJS' : json.dumps( v['stages'] )
-                    , 'fileLocation' : v['_location']
-                }
-    return render_template('pages/manage.html'
-            , availableTasks=extendedTasks)
 
 class BaseCSTL3View(FlaskMethodView):
     """
@@ -232,7 +338,7 @@ class Castlib3TaskView( BaseCSTL3View, CachedTaskView ):
         return md5(stageName).hexdigest()
 
     def get(self, stageName):
-        stagesDescription = gAvailableTasks.get( stageName, None )
+        stagesDescription = gTaskRegistry.get( stageName, None ) if gTaskRegistry else None
         if not stagesDescription:
             abort( HTTP_STATUS_CODES.HTTP_404_NOT_FOUND )
         return super( Castlib3TaskView, self).delayed_retrieve( self
@@ -243,7 +349,7 @@ class Castlib3TaskView( BaseCSTL3View, CachedTaskView ):
                 )
 
     def post(self, stageName):
-        stagesDescription = gAvailableTasks.get( stageName, None )
+        stagesDescription = gTaskRegistry.get( stageName, None ) if gTaskRegistry else None
         if not stagesDescription:
             abort( HTTP_STATUS_CODES.HTTP_404_NOT_FOUND )
         pass
@@ -256,6 +362,6 @@ sVresources_ObservablePages = [
         # title, destination
           ('CASTOR entries', 'cstl3.observe_filesystem')
         , ('Manage CastLib tasks', 'cstl3.manage_cstl3')
-        # ('API reference', 'extGDML.reference')  # TODO
+        # ('API reference', 'cstl3.reference')  # TODO
     ]
 
