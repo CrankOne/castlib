@@ -183,7 +183,7 @@ def index_directory( dirEntry
                               , reporter=reporter )
         for cEntry in folderEntry.children.values():
             assert(issubclass(type(cEntry), FSEntry))
-            if not type(cEntry) is File:
+            if not issubclass(type(cEntry), File):
                 continue
             if not cEntry.name in dirEntry['files']:
                 DB.session.delete( cEntry )

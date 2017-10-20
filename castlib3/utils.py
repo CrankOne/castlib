@@ -23,11 +23,24 @@ from __future__ import print_function
 
 #from castlib3.castor.config import gCastor2Config  # TODO
 from itertools import izip_longest
-import os, datetime
+import os, datetime, re
+from dateutil.relativedelta import relativedelta
+from dateutil import parser as datetimeParser
+
 
 """
 Miscellaneous utility routines.
 """
+
+timeDurationUnits = [
+        r'second', r'minute', r'hour', r'day', r'week', r'month', r'year'
+    ]
+
+T_rxsTimeDurationRegex = r'((?P<%s>\d+)%ss?)'
+rxTimeDurUnitsList = [re.compile(T_rxsTimeDurationRegex%(u, u)) for u in timeDurationUnits]
+
+rxsTimeDurExpr = r'^((\d+\s*(%s)s?[,\s]*))+$'%('|'.join(timeDurationUnits))
+rxTimeDurExpr = re.compile( rxsTimeDurExpr )
 
 # Types below are designed to be used adjointly with argparse module.
 # Thanks to:
@@ -160,6 +173,7 @@ def pid_exists(pid):
     else:
         return True
 
+
 def truncate_timestamp( origTimestamp ):
     """
     Note: CASTOR ignores seconds, so we need here to truncate local timestamp
@@ -167,4 +181,77 @@ def truncate_timestamp( origTimestamp ):
     """
     return int(datetime.datetime.fromtimestamp(origTimestamp) \
                             .replace(second=0).strftime('%s'))
+
+
+def human_readable_time( deltaSecs ):
+    delta = relativedelta(seconds=deltaSecs)
+    attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds']
+    return ', '.join( ['%d %s'%( getattr(delta, attr), getattr(delta, attr) > 1 and attr or attr[:-1] )
+                        for attr in attrs if getattr(delta, attr)] )
+
+
+def timedelta_from_human_readable( delta ):
+    """
+    Accepts time delta in form:
+        "2weeks, 1day"
+    Returns dateutil.relativedelta object. Possible units are listed above, in
+    `timeDurationUnits' list and corresponds to dateutil.relativedelta ctr
+    keyword arguments: seconds, minutes, hours, days, weeks, months, years.
+    Both, plural and singular forms are supported (i.e. "2week" is equivalent
+    to "2weeks").
+    """
+    # Tokenize string and trim whitespaces:
+    deltaLst = [s.strip() for s in delta.split(',')]
+    # Convert list of strings to list of list of matches:
+    deltaLst = [ map( lambda rx : rx.match(e), rxTimeDurUnitsList ) for e in deltaLst ]
+    # Keep only true matches:
+    deltaLst = [ filter( lambda m : m, e ) for e in deltaLst ]
+    # (diag) Check that all the tokens matches to single regex in list:
+    erroneousTokens = filter( lambda ms : len(ms) != 1, deltaLst )
+    if erroneousTokens:
+        raise RuntimeError( 'Tokens can not be parsed within HR time '
+                'delta: "%s".'%('", "'.join(erroneousTokens)) )
+    deltaLst = map( lambda ms : ms[0], deltaLst )
+    # Converge array of dicts into one dict:
+    kwargs = reduce( lambda kw, m : kw.update(m.groupdict()) or kw
+                   , [{},] + deltaLst )
+    # (diag) Check that all the tokens refer to different time values (i.e.
+    # there are no repetitions, for instance "1days, 2hours, 3days").
+    if len(kwargs) != len(deltaLst):
+        raise RuntimeError('Time delta string contains repeatitions: %r.'%delta)
+    # Turn singular keys naming into the plural by adding 's' to the key string:
+    kwargs = dict( (k + 's' if not k.endswith('s') else k, v) for k,v in kwargs.items() )
+    return dateutil.relativedelta( **kwargs )
+
+
+def expiration_to_datetime( expiration ):
+    """
+    Accepts values in form:
+        ::= <int>
+          | <int> ( 'seconds'|'minutes?'|'hours?'|'days?'|'months?'|'years?' )
+          | <datetime.timedelta>
+          | <datetime.datetime>
+          ;
+    returning datetime object. If argument is given as a time interval, returns
+    the expiration time from now. If argument is of integer type, assumes it is
+    being given in seconds.
+    """
+    if type(expiration) is datetime.datetime:
+        return expiration
+
+    if type(expiration) is str:
+        if rxTimeDurExpr.match(expiration):
+            # returns timedelta from HR interval expression (e.g. "1week, 2hours"):
+            expiration = timedelta_from_human_readable( expiration )
+        else:
+            # returns particular time from HR expression:
+            expiration = datetimeParser.parse( expiration )
+    if type(expiration) is datetime.timedelta:
+        expiration = datetime.datetime.now() + expiration
+    if type(expiration) is int:
+        expiration = datetime.datetime.fromtimestamp(expiration)
+    if type(expiration) is not datetime.datetime:
+        raise RuntimeError( 'Unable to convert %r object of type %s to '
+                'datetime.'%( expiration, type(expiration) ) )
+    return expiration
 

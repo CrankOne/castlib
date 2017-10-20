@@ -22,8 +22,8 @@
 from __future__ import print_function
 
 """
-This stage sends entries from local database to the given HTTP address within
-POST request.
+This stage performs comparison-based selection of entries within two referenced
+locations for further treatment.
 """
 
 import os, datetime
@@ -151,7 +151,7 @@ def get_location_by_path( path ):
     return folderEntry
 
 
-class Select( Stage ):
+class SelectMismatches( Stage ):
     __metaclass__ = StageMetaclass
     __castlib3StageParameters = {
         'name' : 'select-mismatches',
@@ -164,13 +164,13 @@ class Select( Stage ):
     }
 
     def __init__(self, *args, **kwargs):
-        super(Select, self).__init__(*args, **kwargs)
+        super(SelectMismatches, self).__init__(*args, **kwargs)
 
-    def _V_call( self,
-                mismatches=['size', 'adler32', 'modified', 'missing', 'deleted'],
-                truncateSeconds=False,  # we had to introduce this since some backends don't support it
-                referential=None,
-                destination=None ):
+    def _V_call( self
+               , mismatches=['size', 'adler32', 'modified', 'missing', 'deleted']
+               , truncateSeconds=False  # we had to introduce this since some DB backends don't support it
+               , referential=None
+               , destination=None ):
         refLoc = get_location_by_path( referential )
         dstLoc = get_location_by_path( destination )
         fullPathRef = [ p.name for p in refLoc.mp.query_ancestors().all()]
