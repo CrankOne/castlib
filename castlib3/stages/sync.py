@@ -89,6 +89,7 @@ class Sync( Stage ):
                 mismatchesName, from_, n, len(mismatches)) )
             getattr(self, 'sync_' + mismatchesName)( *results[from_][mismatchesName]
                                                    , backends=backends
+                                                   , nMaxEntries=nMaxEntries
                                                    , truncateSeconds=truncateSeconds
                                                    , extractChecksumOnUpload=extractChecksumOnUpload
                                                    , commitEvery=commitEvery
@@ -98,6 +99,7 @@ class Sync( Stage ):
 
     def sync_modified( self
                      , mismatchQuery, refLoc, dstLoc
+                     , nMaxEntries=0
                      , backends={}
                      , commitEvery=0
                      , truncateSeconds=False
@@ -105,12 +107,12 @@ class Sync( Stage ):
                      , validateChecksum=True
                      , allowNULL=False
                      , reporter=None ):
-        n, nMax = 0, mismatchQuery.count()
+        n, nMax = 0, nMaxEntries or mismatchQuery.count()
         bar = ReportingBar( 'syncing modified timestamps'
                     , max=nMax
                     , suffix='%(index)d/%(max)d, %(prec_hr_time)s remains'
                     , reporter=reporter )
-        for entry in mismatchQuery:
+        for entry in (mismatchQuery if not nMaxEntries else mismatchQuery.limit(nMaxEntries)):
             n += 1
             trgF = entry[0]
             refF = entry[1]
@@ -141,6 +143,7 @@ class Sync( Stage ):
 
     def sync_size( self
                  , mismatchQuery, refLoc, dstLoc
+                 , nMaxEntries=0
                  , backends={}
                  , commitEvery=0
                  , truncateSeconds=False
@@ -152,8 +155,8 @@ class Sync( Stage ):
         #            , max=mismatchQuery.count()
         #            , suffix='%(index)d/%(max)d, %(eta)ds remains'
         #            , reporter=reporter )
-        n, nMax = 0, mismatchQuery.count()
-        for entry in mismatchQuery:
+        n, nMax = 0, nMaxEntries or mismatchQuery.count()
+        for entry in (mismatchQuery if not nMaxEntries else mismatchQuery.limit(nMaxEntries)):
             n += 1
             trgF = entry[0]
             refF = entry[1]
@@ -189,20 +192,21 @@ class Sync( Stage ):
     def sync_missing( self
                     , mismatchQuery, refLoc, dstLoc
                     , backends={}
+                    , nMaxEntries=0
                     , commitEvery=0
                     , truncateSeconds=False
                     , extractChecksumOnUpload=True
                     , allowNULL=False  # pointless
                     , validateChecksum=True
                     , reporter=None ):
-        n, nMax = 0, mismatchQuery.count()
+        n, nMax = 0, nMaxEntries or mismatchQuery.count()
         if nMax > 1e6:
             gLogger.warning('Too much entries to treat. Check selection criteria.')
             return
-        for entry in mismatchQuery:
+        for entry in (mismatchQuery if not nMaxEntries else mismatchQuery.limit(nMaxEntries)):
             n += 1
             srcF = entry[0]
-            assert( entry[1] is None )  # Has be size mismatch.
+            assert( entry[1] is None )  # Has to be size mismatch.
             filename = srcF.name
             srcURI, dstURI = srcF.get_uri(), os.path.join(dstLoc.get_uri(), filename)
             srcLPP = urlparse(srcURI)

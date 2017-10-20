@@ -24,7 +24,9 @@ from __future__ import print_function
 from abc import ABCMeta, abstractmethod, abstractproperty
 import os, shlex, zlib, fnmatch, datetime
 from urlparse import urlparse
-from castlib3.models.filesystem import File, Folder
+from castlib3.models.filesystem import File, Folder, ExpiringEntry
+from castlib3.logs import gLogger
+from castlib3.utils import expiration_to_datetime
 
 # Keeps all the declared backends classes indexed by their schemes
 gCastlibBackends = {}
@@ -190,7 +192,6 @@ class AbstractBackend(object):
                 # Attribute was explicitly set.
                 continue
             kwd[k] = getattr(self, 'get_' + k)(path)
-        #print( '\nXXX:', kwd )  # XXX
         return File( **kwd )
 
     def new_folder( self, path, **kwargs ):
@@ -226,7 +227,7 @@ class LocalBackend(AbstractBackend):
     __metaclass__ = BackendMetaclass
     __backendAttributes__ = {
             'scheme' : 'file'
-    }
+        }
 
     def get_adler32(self, path):
         """Shall return the hexidecimal digest built from the file content."""
@@ -326,4 +327,40 @@ class LocalBackend(AbstractBackend):
 
     def uri_from_path(self, path):
         return 'file://' + path
+
+
+class LocalVolatileBackend( LocalBackend ):
+    """
+    A volatile local file backend. Used to sync against expiring filesystem
+    entries.
+    """
+    __metaclass__ = BackendMetaclass
+    __backendAttributes__ = {
+            'scheme' : 'file+volatile'
+        }
+
+    def new_file( self, path, **kwargs):
+        """
+        Requires expiration timestamp and/or datetime object to be provided
+        within `expiration' argument.
+        """
+        kwd = dict(kwargs)
+        sf = kwd.pop('syncFields', ['modified', 'size'])
+        expiration = kwd.pop('expiration', 'omitted')
+        if expiration == 'omitted':
+            gLogger.error( 'No "expiration" keyword argument provided to '
+                    'new_file( "%s", ... ) of the file+volatile backend.'%path )
+        else:
+            if type(expiration) is not datetime.datetime:
+                expiration = expiration_to_datetime( expiration )
+            kwd['expiration'] = expiration
+        for k in sf:
+            if k in kwd.keys():
+                # Attribute was explicitly set.
+                continue
+            kwd[k] = getattr(self, 'get_' + k)(path)
+        return ExpiringEntry( **kwd )
+
+    def uri_from_path(self, path):
+        return 'file+volatile://' + path
 

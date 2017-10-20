@@ -118,6 +118,18 @@ def _reporter_view__list_views( reporter, data ):
 
 gReportingViews['list-views'] = _reporter_view__list_views
 
+def _reporter_view__stop( reporter, data ):
+    """
+    Returns object (dict) listing available views with their descriptions.
+    """
+    ret = {}
+    for k in gReportingViews.keys():
+        if k not in reporter.disabledViews:
+            ret[k] = gReportingViews[k].__doc__
+    return ret
+
+gReportingViews['list-views'] = _reporter_view__list_views
+
 #
 # Generic status querying
 

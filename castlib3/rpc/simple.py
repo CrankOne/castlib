@@ -29,8 +29,8 @@ transmitting the progress information. For advanced server see rpc.reporter.
 import socket, json, yaml, pickle, struct
 from time import time
 from castlib3.logs import gLogger
+from castlib3.utils import human_readable_time
 from progress.bar import Bar
-from dateutil.relativedelta import relativedelta
 
 def send_msg(sock, msg):
     # Prefix each message with a 4-byte length (network byte order)
@@ -84,12 +84,6 @@ def recieve_stages( srvAddr, portNo ):
             raise TypeError("Unsupported data format: `%s'"%dataType)
     finally:
         conn.close()
-
-def human_readable_time( deltaSecs ):
-    delta = relativedelta(seconds=deltaSecs)
-    attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds']
-    return ', '.join( ['%d %s'%( getattr(delta, attr), getattr(delta, attr) > 1 and attr or attr[:-1] )
-                        for attr in attrs if getattr(delta, attr)] )
 
 class ReportingBar(Bar):
     def __init__(self, *args, **kwargs):
