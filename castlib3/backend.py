@@ -28,8 +28,184 @@ from castlib3.models.filesystem import File, Folder, ExpiringEntry
 from castlib3.logs import gLogger
 from castlib3.utils import expiration_to_datetime
 
+# Note: python v < 3.4 doesn't have a partialmethod.
+try:
+    from functools import partialmethod
+except ImportError:
+    from functools import partial
+    class partialmethod(partial):
+        def __get__(self, instance, owner):
+            if instance is None:
+                return self
+            return partial(self.func, instance,
+                           *(self.args or ()), **(self.keywords or {}))
+
 # Keeps all the declared backends classes indexed by their schemes
 gCastlibBackends = {}
+
+class CopyingRegistryBase(dict):
+    """
+    A class wrapping standard python dictionary in a way offering a bit more
+    convinient insertion of new copying procedures between various back-ends.
+    The setitem and getitem methods are overloaded. Generally, they transform
+    given tuple or list of two strings denoting target back-ends into a single
+    combining string in a form 'from->to', where 'from' and 'to' are,
+    correspondingly, the source and target back-ends.
+    One may use tuple/lists of back-end string names referring sets of
+    back-ends in insertion. I.e. the
+        crb[('file', 'eos'), 'file'] = systemp_copy
+    will cause the 'system_copy' function (or other callable object) being
+    returned for any of this expressions:
+        crb[('file', 'file')]
+        crb[('eos', 'file')]
+    This base class is further extended by BackendsInteractionIndex descendant
+    class.
+    This class shall be further used as indexing container base for
+    owner/permission copier as well.
+    """
+    def __keytransform__(self, key):
+        if not( type(key) is not tuple \
+                or type(key) is not list):
+            raise TypeError( "Type of registry index has to be a pair of "
+                             "strings denoting source and destination "
+                             "back-ends (got %r)."%(type(key)) )
+        if 2 != len(key):
+            raise TypeError( "Type of registry index has to be a pair of "
+                             "strings denoting source and destination "
+                             "back-ends (got %r of length %d)."%(
+                                 type(key), len(key) ) )
+        if not (type(key[0]) is str \
+                or type(key[1]) is str):
+            raise TypeError( "Type of registry index has to be a pair of "
+                             "strings denoting source and destination "
+                             "back-ends (got %r of {%r, %r})."%(
+                                 type(key), type(a[0]), type(a[1]) ) )
+        return '%s->%s'%( key[0], key[1] )
+
+    def __getitem__( self, key ):
+        return dict.__getitem__(self, self.__keytransform__(key))
+
+    def __setitem__( self, key, value ):
+        if not(type(key) is tuple \
+               or type(key) is list):
+            raise TypeError( "Type of registry index has to be a pair of "
+                             "strings denoting source and destination "
+                             "back-ends (got %r)."%(type(key)) )
+        if 2 != len(key):
+            raise TypeError( "Type of registry index on setting has to be a "
+                             "pair of strings or pair of lists/tuples denoting "
+                             "source and destination back-ends (got %r of "
+                             "length %d)."%( type(key), len(key) ) )
+        if type(value) is not dict:
+            raise TypeError( 'Value has to be of type dict, not the %r.'%type(value) )
+        srcs, dsts = key[0], key[1]
+        if type(srcs) is str:
+            srcs = (srcs,)
+        if type(dsts) is str:
+            dsts = (dsts,)
+        for src in srcs:
+            for dst in dsts:
+                keyStr = self.__keytransform__((src, dst))
+                if hasattr( self, keyStr ):
+                    dict.__getitem__(self, keyStr).update(value)
+                else:
+                    dict.__setitem__(self, keyStr, value)
+
+class BackendsInteractionIndex(CopyingRegistryBase):
+    """
+    ...
+    """
+    interactions = [
+                'file',
+                'directory',
+                'ownership',
+                'modification'
+            ]
+
+    def set_copier(self, copierStr, *args):
+        if copierStr not in self.__class__.interactions:
+            raise AttributeError('Copier has to be one of '
+                    'the: %s.'%(', '.join(self.__class__.interactions)))
+        self[*(args[:-1])] = {copierStr : args[:1]}
+
+    set_file_copier = partialmethod( set_copier, 'file' )
+    set_directory_copier = partialmethod( set_copier, 'directory' )
+    set_ownership_copier = partialmethod( set_copier, 'ownership' )
+    set_modification_copier = partialmethod( set_copier, 'modification' )
+
+    def copy( self, sourceURI, destURI
+            , backends={}
+            , keepOwner=False  # may be set to owner ID supported by back-end.
+            , keepModTime=True ):
+        """
+        This function mimics the usual system 'cp' util behaviour. If
+        sourceURI refers to directory, the recursive directory copying will be
+        invoked (not implemented yet). If destURI is an existing directory, the
+        content of sourceURI (file or dir) will be copied _into_ it, otherwise
+        the directory will be created if sourceURI is dir as well. If destURI
+        refers to non-existing directory and sourceURI is a file, the exception
+        will be thrown.
+        """
+        lppSrc = urlparse( sourceURI )
+        lppDst = urlparse( destURI )
+        srcBackend = backends[ lppSrc.scheme or 'file' ]
+        dstBackend = backends[ lppSrc.scheme or 'file' ]
+        srcExists, dstExists = srcBackend.exists( srcURI ), dstBackend.exists( dstURI )
+        srcIsDir, dstIsDir = srcBackend.isdir( srcURI ), dstBackend.isdir( dstURI )
+        srcIsLink, dstIsLink = srcBackend.islink( srcURI ), dstBackend.islink( dstURI )
+        if srcIsLink or dstIsLink:
+            # TODO:
+            raise NotImplementedError("Symlinks treatment is not implemented "
+                    "yet (%s or (and) %s is (are) symlinks)."%( srcURI, dstURI ) )
+        pass  # ...
+        subsArgs = [sourceURI, destURI]
+        subsKWargs = { 'backends' : backends
+                     , 'srcBackend' : srcBackend, 'dstBackend' : dstBackend
+                     , 'lppSrc' : lppSrc, 'lppDst' : lppDST
+            }
+        if not srcIsDir:
+            self.copy_file( *subsArgs, **subsKWargs )
+        elif srcIsDir and dstIsDir:
+            if dstExists:
+                self.copy_dir( *subsArgs, **subsKWargs )
+            else:
+                raise NotImplementedError( 'backend::mkdir() is not yet '
+                        'supported (%s).'%destURI )
+                #dstBackend.mkdir(  ) timestamps, owner, etc.
+                self.copy_dir( *subsArgs, **subsKWargs )
+        else:
+            raise RuntimeError( "Source is a dir (%s), but destination is "
+                    "not a directory (%s). Can not copy directory."%(sourceURI, destURI) )
+
+    def __setitem__( self, key, value ):
+        raise RuntimeError('Direct set of BackendsInteractionIndex entry is '
+                'not supported. Use add_<interaction>() method instead, where '
+                '<interaction> is one of: %s.'%(', '.join(self.__class__.interactions)) )
+
+    def copy_file( sourceURI, destURI, backends={}
+                , srcBackend=None, dstBackend=None
+                , lppSrc=None, lppDst=None ):
+        if lppSrc is None:
+            lppSrc = urlparse( sourceURI )
+        if lppDst is None:
+            lppDst = urlparse( destURI )
+        if srcBackend is None:
+            srcBackend = backends[lppSrc.scheme or 'file']
+        if dstBackend is None:
+            dstBackend = backends[lppDst.scheme or 'file']
+        return self[(lppSrc.scheme, lppDst.scheme)]( sourceURI, destURI
+              , backends=backends
+              , srcBackend=srcBackend, dstBackend=dstBackend
+              , lppSrc=lppSrc, lppDst=lppDst )
+
+        raise NotImplementedError('Copying file is not yet '
+                'implemented (%s).'%destURI)  # TODO
+
+    def copy_dir( sourceURI, destURI, backends={}
+                , srcBackend=None, dstBackend=None
+                , lppSrc=None, lppDst=None ):
+        raise NotImplementedError('Copying dir is not yet '
+                'implemented (%s).'%destURI)  # TODO
 
 class BackendMetaclass(ABCMeta):
     def __new__(cls, clsname, bases, dct):
@@ -99,9 +275,17 @@ class AbstractBackend(object):
         given by path.
         """
         pass
+    
+    @abstractmethod
+    def exists(self, path):
+        """
+        Returns True if path refers to an existing path or file.
+        """
+        pass
+
 
     @abstractmethod
-    def isfile(self, path):
+    def isfile(self, path, followSymlink=False):
         """
         Return True if path is an existing regular file. This follows symbolic
         links, so both islink() and isfile() can be true for the same path.
@@ -109,7 +293,7 @@ class AbstractBackend(object):
         pass
 
     @abstractmethod
-    def isdir(self, path):
+    def isdir(self, path, followSymlink=False):
         """
         Return True if path is an existing directory. This follows symbolic
         links, so both islink() and isdir() can be true for the same path.
@@ -262,7 +446,15 @@ class LocalBackend(AbstractBackend):
         lpp = urlparse(path)
         return os.listdir(lpp.path)
 
-    def isfile(self, path):
+    def exists(self, path):
+        """
+        Forwards invokation to os.path.exists() after parsing 'path'
+        with urlparse.
+        """
+        lpp = urlparse(path)
+        return os.path.exists( lpp.path )
+
+    def isfile(self, path, followSymlink=False):
         """
         Return True if path is an existing regular file. This follows symbolic
         links, so both islink() and isfile() can be true for the same path.
@@ -270,7 +462,7 @@ class LocalBackend(AbstractBackend):
         lpp = urlparse(path)
         return os.path.isfile(lpp.path)
 
-    def isdir(self, path):
+    def isdir(self, path, followSymlink=False):
         """
         Return True if path is an existing directory. This follows symbolic
         links, so both islink() and isdir() can be true for the same path.

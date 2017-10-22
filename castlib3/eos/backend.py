@@ -104,14 +104,17 @@ class EOSBackend(AbstractBackend):
             raise RuntimeError( 'REST response does not contain children (is it a dir?).' )
         namesLst = map( lambda e: e['name'], dInfo['children'] )
 
-    def isfile(self, path):
+    def exists(self, path):
+        raise NotImplementedError('TODO: check existance of file/dir with EOS back-end.')  # TODO
+
+    def isfile(self, path, followSymlink=False):
         """
         TODO: find a better way.
         """
         dInfo = self._run_cmd_on_path_REST( path, 'fileinfo' )
         return 'nndirectories' not in dInfo.keys()
 
-    def isdir(self, path):
+    def isdir(self, path, followSymlink=False):
         """
         TODO: find a better way.
         """

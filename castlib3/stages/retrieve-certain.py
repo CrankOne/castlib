@@ -45,19 +45,10 @@ class Retrieve2TempLoc( Stage ):
     __castlib3StageParameters = {
         'name' : 'retrieve',
         'description' : """
-        Will retrieve a files, by given names from given locations and store
-        them in temporary location.
-
-        Staging arguments implies:
-        - list of files to be retrieved
+        Will retrieve a files selected by some previous stages.
+        Note: if noCleanExpired is not set, will wipe out expired files.
         """
     }
-
-    #_allowedProcedures = {
-    #        'retrieve' : None,
-    #        'cleanup' : None,
-    #        'update-expiration' : None,
-    #    }
 
     def __init__(self, *args, **kwargs):
         super(Retrieve2TempLoc, self).__init__(*args, **kwargs)
@@ -67,7 +58,6 @@ class Retrieve2TempLoc( Stage ):
                 , results=None
                 , from_=None
                 , criterion='select'
-                , retrieveNames=[]
                 , sourceLocations=[]
                 , validityPeriod=None
                 , backends={}
@@ -83,52 +73,36 @@ class Retrieve2TempLoc( Stage ):
         if ':/' not in destination:
             # The destination is probably reference to defined locations:
             destination = locations[destination]['URI']
-        if (retrieveNames and from_) \
-        or (not retrieveNames and not from_):
-            raise RuntimeError( 'The "from_" and "retrieveNames" arguments are '
-                    'both set or both are not set.' )
-        destLPP = urlparse( destination )
-        backend = backends[destLPP.scheme]
-        resolvedLocs = []
-        destinationLoc = get_location_by_path( destination )
-        for locStr in [destinationLoc,] + sourceLocations:
-            resolvedLocs.append( get_location_by_path( locStr ) )
-        q = DB.session.query( ExpiringEntry ).filter_by(parent=destinationLoc)
-        # Clean-up expired entries:
+        destinationLoc, scheme = self.resolve_dest_location( destination )
+        backend = backends[ destLPP.scheme ]
+        # Clean-up expired entries if need:
         if not noCleanExpired:
-            for expiredE in q.filter_by( expiration > datetime.datetime.now() ):
-                fileURI = expiredE.get_uri()
-                gLogger.info('Deleting expired file "%s".'%(
-                        fileURI ))  # ... (staled %s).
-                backend.del_file( filePath )
-                DB.session.delete( expiredE )
-        for eStr in retrieveNames:
-            # Locate entry within given variants
-            fileEntry = None
-            for loc in [destinationLoc,] + resolvedLocs:
-                fileEntry = DB.session.query( File ) \
-                        .filter_by( name=eStr, parent=loc ).one_or_none()
-                if fileEntry:
-                    break
-            if fileEntry is None:
-                gLogger.error( 'Unable to locate "%s" in locations: %s'%(
-                        eStr, ', '.join(sourceLocations) ) )
-                continue  # NEXT
-            if fileEntry.parent is destinationLoc:
-                # TODO: update expiration
-                gLogger.info( 'File "%s" is already migrated to "%s". '
-                        'Expiration time updated.'%( eStr, destination ) )
-                continue  # NEXT
-            self.retrieve_file( fileEntry )
-        for selectCriterion in results[from_].keys() if from_ else []:
-            for selectTuple in results[from_][criterion]:
-                self.retrieve_selection( *selectTuple )
-        raise NotImplementedError('Stage not implemented.')
+            self.clear_expired_at( destinationLoc, backend )
+        # Retrieve selected files:
+        for entry in results[from_]:
+            self.retrieve_file( entry, destinationLoc )
 
+    def resolve_dest_location(self, destination):
+        destLPP = urlparse( destination )
+        destinationLoc = get_location_by_path( destination )
+        return destinationLoc, destLPP.scheme or 'file'
 
-    def retrieve_file( self, originalEntry ):
-        pass
+    def clear_expired_at(self, destinationLoc, backend ):
+        q = DB.session.query( ExpiringEntry ).filter_by( parent=destinationLoc )
+        for expiredE in q.filter_by( expiration > datetime.datetime.now() ):
+            fileURI = expiredE.get_uri()
+            gLogger.info('Deleting expired file "%s".'%(
+                    fileURI ))  # ... (staled %s).
+            backend.del_file( filePath )
+            DB.session.delete( expiredE )
 
-    def retrieve_selection( self, query, refLoc, dstLoc=None ):
-        pass
+    def retrieve_file( self, originalEntry, destinationLoc
+                     , backends={}
+                     , destBackend=None ):
+        origURI = originalEntry.get_uri()
+        origLPP = urlparse( origURI )
+        origBackend = backends[origLPP.scheme]
+        if destBackend is None:
+            destBackend = backends[destinationLoc.scheme or 'file']
+        raise NotImplementedError('TODO: copying between back-ends.')
 

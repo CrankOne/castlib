@@ -74,14 +74,22 @@ class CASTORBackend(AbstractBackend):
                             , remotePath=lpp.path
                             , regexToApply=rxNSLS) )
 
-    def isfile(self, path):
+    def exists(self, path):
+        lpp = urlparse(path)
+        # TODO: check this!
+        fb = invoke_util( 'nsls'
+                        , dirPath=lpp.path
+                        , regexToApply=rxNSLS)
+        return fb
+
+    def isfile(self, path, followSymlink=False):
         lpp = urlparse(path)
         fb = invoke_util( 'nsls-dir'
                         , dirPath=lpp.path
                         , regexToApply=rxNSLS)['mode'][0][0]
         return '-' == fb or 'm' == fb
 
-    def isdir(self, path):
+    def isdir(self, path, followSymlink=False):
         lpp = urlparse(path)
         fb = invoke_util( 'nsls-dir'
                         , dirPath=lpp.path
