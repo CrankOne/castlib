@@ -37,7 +37,7 @@ setup(name = "castlib3",
     packages = [ 'castlib3.sVbp',
                  'castlib3'],
     package_dir = {
-            'castlib3.sVbp' : 'sVbp',
+            #'castlib3.sVbp' : 'sVbp',
             'castlib3' : 'castlib3' },
     scripts = ['cstl3-run'],
     install_requires=reqs,
