@@ -28,18 +28,17 @@ except Exception as e:
 
 reqs = [str(ir.req) for ir in installReqs]
 
-setup(name = "castlib3",
-    version = "0.3",
-    description = "Automated synchronization of filesystem entries among various locations.",
+setup(name = "castlib4",
+    version = "0.4",
+    description = "RESTful file management solution.",
     author = "Renat R. Dusaev",
     author_email = "crank@qcrypt.org",
     url = "https://github.com/CrankOne/castlib",
-    packages = [ 'castlib3.sVbp',
-                 'castlib3'],
+    packages = [ 'castlib4'],
     package_dir = {
             #'castlib3.sVbp' : 'sVbp',
-            'castlib3' : 'castlib3' },
-    scripts = ['cstl3-run'],
+            'castlib4' : 'castlib4' },
+    scripts = ['cstl4-run'],
     install_requires=reqs,
     long_description = """\
 The package is designed for automated synchronization of medium-scale data

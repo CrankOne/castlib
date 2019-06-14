@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 # Copyright (c) 2016 Renat R. Dusaev <crank@qcrypt.org>
 # Author: Renat R. Dusaev <crank@qcrypt.org>
 # 
@@ -19,24 +19,14 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from __future__ import print_function
-import unittest
+"""
+Executable script starting a daemon that provides a RESTful interface to
+CASTOR storage.
+"""
 
-from castlib3.backend import CopyingRegistryBase
+import argparse
 
-class TestFilesystemModel(unittest.TestCase):
-    def test_copying_registry_base(self):
-        self.cr = CopyingRegistryBase()
-        self.cr[ ['file', ['castor', 'eos', 'whatever', 'file']] ] = {'file', 23}
-        self.cr[ [['castor', 'eos'], ['file', 'eos']] ] = {'file', 32}
-        self.cr[ ['file', 'file'] ] = {'file', 42}
-        self.assertEquals( 23, self.cr['file', 'castor']['file'] )
-        self.assertEquals( 23, self.cr['file', 'eos']['file'] )
-        self.assertEquals( 23, self.cr['file', 'whatever']['file'] )
-        self.assertEquals( 32, self.cr['castor', 'file']['file'] )
-        self.assertEquals( 32, self.cr['eos', 'file']['file'] )
-        self.assertEquals( 42, self.cr['file', 'file']['file'] )
+if "__main__" == __name__:
+    pass
 
-if '__main__' == __name__:
-    unittest.main()
 
