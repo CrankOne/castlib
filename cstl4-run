@@ -25,6 +25,7 @@ CASTOR storage.
 """
 
 import argparse
+import castlib4.models.filesystem as fs
 
 if "__main__" == __name__:
     pass

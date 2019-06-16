@@ -27,3 +27,4 @@ CMakeFiles
 **/Linux/*
 castlib3.egg-info/*
 venv/*
+.venv/*

@@ -1,0 +1,27 @@
+
+storages:
+    na64-data-castor:
+        role: endpoint
+        backend:
+            type: CASTOR
+            path: /castor/cern.ch/na64/data/cdr
+            mask: '*.dat'
+            utils:
+                nsls:
+                    exec: /usr/bin/nsls
+                    template: '{exec} --class --checksum -l {path}'
+                stager-get:
+                    exec: /usr/bin/stager_get
+                    # template: ...
+                stager-qry:
+                    exec: /usr/bin/stager_qry
+                    template: '{exec} -U {tag}'
+                xrdcp:
+                    exec: /usr/bin/xrdcp
+                    # template: ... ?
+    local-cache:
+        role: cache
+        backend:
+            type: local
+            path: /eos/home-r/rdusaev/cstl4.cache
+
