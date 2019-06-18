@@ -24,10 +24,20 @@ Executable script starting a daemon that provides a RESTful interface to
 CASTOR storage.
 """
 
-import argparse
+import sys, argparse
 import castlib4.models.filesystem as fs
+import castlib4.backend as be
+
+import json  # XXX
 
 if "__main__" == __name__:
-    pass
+    lbe = be.LocalBackend()
+    entries = lbe.ls_detailed( sys.argv[1]
+                             , recursive=True
+                             , filePropertiesExclude=['adler32']
+                             , omitEmptyDirs=True
+                             , pattern='.*.py$' )
+    #print( json.dumps( entries, indent=2) )
+    #print( lbe.adler32(sys.argv[1]) )
 
 

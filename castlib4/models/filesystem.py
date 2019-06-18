@@ -30,10 +30,13 @@ from sqlalchemy.orm.collections import attribute_mapped_collection
 from castlib4.models import DeclBase
 from castlib4.logs import gLogger
 
-from urlparse import urlunsplit
-
+#from urlparse import urlunsplit
 # See for neat example of recursive adjacency list:
 # https://github.com/zzzeek/sqlalchemy/blob/master/examples/adjacency_list/adjacency_list.py
+
+FS_PI_UNKNOWN = 0
+FS_PI_FILE = 1
+FS_PI_FOLDER = 2
 
 class UpdatingMixin(object):
     def update_fields(self, **kwargs):
@@ -58,22 +61,26 @@ class UpdatingMixin(object):
 
 class FSEntry(DeclBase, UpdatingMixin):
     """
-    Base filesystem entry
+    Baseic filesystem entry model.
     """
-    __tablename__ = 'sync_entries'
+    __tablename__ = 'fs_sync_entries'
     __mp_manager__ = 'mp'
     __mp_parent_id_field__ = 'parentID'
 
     id = Column(Integer, primary_key=True)
     parentID = Column(Integer, ForeignKey('folders.id'))
 
-    type = Column(String(1))
+    type = Column(Integer)
     name = Column(String, nullable=False)
+    # TODO: creation date?
+    # TODO: last sync date?
+    # TODO: local path?
+    # TODO: md5 checksum?
 
     modified = Column(DateTime)
 
     __mapper_args__ = {
-        'polymorphic_identity' : 'sync_entries',
+        'polymorphic_identity' : FS_PI_UNKNOWN,
         'polymorphic_on' : type
     }
 
@@ -121,7 +128,7 @@ class Folder(FSEntry, UpdatingMixin):
         )
 
     __mapper_args__ = {
-        'polymorphic_identity' : 'd',
+        'polymorphic_identity' : FS_PI_FOLDER,
         'inherit_condition': id == FSEntry.id
     }
 
@@ -141,68 +148,64 @@ class Folder(FSEntry, UpdatingMixin):
 class File(FSEntry, UpdatingMixin):
     __tablename__ = 'files'
     #__mp_manager__ = 'mp'
-    id = Column(Integer, ForeignKey('sync_entries.id'), primary_key=True)
+    id = Column(Integer, ForeignKey('fs_sync_entries.id'), primary_key=True)
 
     size = Column( Integer )
     adler32 = Column( String )
-    # TODO: creation date?
-    # TODO: last sync date?
-    # TODO: local path?
-    # TODO: md5 checksum?
 
     def __str__(self):
         return "-%r: {id=%r, parent_id=%r}" % (
             self.name, self.id, self.parentID )
 
     __mapper_args__ = {
-        'polymorphic_identity' : 'f',
+        'polymorphic_identity' : FS_PI_FILE,
     }
 
-class StoragingNode( DeclBase, UpdatingMixin ):
-    """
-    This model refers to particular remote instance, accessible or not from
-    resources server. It may refer to localhost (file:// scheme),
-    CASTOR (castor://), EOS (eos://) or whatever else. Reaching the particular
-    file will be defined by back-end procedures.
-    Is in the one-to-many relationship with RemoteFolder owning the
-    locations.
-    """
-    __tablename__ = 'storaging_nodes'
-    # Ususally a hostname
-    identifier = Column(String, primary_key=True)
-    # nfs, castor, file, whatever
-    scheme = Column(String, nullable=False)
-
-    locations = relationship( 'RemoteFolder', back_populates='node')
-
-class RemoteFolder( Folder, UpdatingMixin ):
-    """
-    Model representing remote folder keeping a bunch of chunks. Always
-    associated with single StoragingNode.
-    """
-    __tablename__ = 'remote_locations'
-
-    id = Column(Integer, ForeignKey(Folder.id), primary_key=True)
-
-    nodeID = Column(String, ForeignKey('storaging_nodes.identifier'))
-    node = relationship( 'StoragingNode', back_populates='locations' )
-
-    path = Column(String)
-
-    __mapper_args__ = {
-        'polymorphic_identity' : 'r',
-    }
-
-class ExpiringEntry( File ):
-    """
-    An (local) filesystem entries that have expiration date. They're usually
-    a temporary ones.
-    """
-    __tablename__ = 'expiration'
-    fsOriginalID = Column( Integer, ForeignKey(FSEntry.id) )
-    expiration = Column( DateTime )
-
-    __mapper_args__ = {
-        'polymorphic_identity' : 'e',
-    }
+#class StoragingNode( DeclBase, UpdatingMixin ):
+#    """
+#    This model refers to particular remote instance, accessible or not from
+#    resources server. It may refer to localhost (file:// scheme),
+#    CASTOR (castor://), EOS (eos://) or whatever else. Reaching the particular
+#    file will be defined by back-end procedures.
+#    Is in the one-to-many relationship with RemoteFolder owning the
+#    locations.
+#    """
+#    __tablename__ = 'storaging_nodes'
+#    # Ususally a hostname
+#    identifier = Column(String, primary_key=True)
+#    # nfs, castor, file, whatever
+#    scheme = Column(String, nullable=False)
+#
+#    locations = relationship( 'RemoteFolder', back_populates='node')
+#
+#class RemoteFolder( Folder, UpdatingMixin ):
+#    """
+#    Model representing remote folder keeping a bunch of chunks. Always
+#    associated with single StoragingNode.
+#    """
+#    __tablename__ = 'remote_locations'
+#
+#    id = Column(Integer, ForeignKey(Folder.id), primary_key=True)
+#
+#    nodeID = Column(String, ForeignKey('storaging_nodes.identifier'))
+#    node = relationship( 'StoragingNode', back_populates='locations' )
+#
+#    path = Column(String)
+#
+#    __mapper_args__ = {
+#        'polymorphic_identity' : 'r',
+#    }
+#
+#class ExpiringEntry( File ):
+#    """
+#    An (local) filesystem entries that have expiration date. They're usually
+#    a temporary ones.
+#    """
+#    __tablename__ = 'expiration'
+#    fsOriginalID = Column( Integer, ForeignKey(FSEntry.id) )
+#    expiration = Column( DateTime )
+#
+#    __mapper_args__ = {
+#        'polymorphic_identity' : 'e',
+#    }
 

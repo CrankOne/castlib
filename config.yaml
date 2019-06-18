@@ -1,11 +1,15 @@
 
-storages:
+# Node below describes various locations that is supposed to be under control
+# of castlib.
+nodes:
     na64-data-castor:
         role: endpoint
         backend:
             type: CASTOR
             path: /castor/cern.ch/na64/data/cdr
             mask: '*.dat'
+            #user: 'p348data'
+            #group: 'p348data'
             utils:
                 nsls:
                     exec: /usr/bin/nsls
