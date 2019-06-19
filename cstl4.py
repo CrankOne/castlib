@@ -20,24 +20,40 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
-Executable script starting a daemon that provides a RESTful interface to
-CASTOR storage.
+Executable script providing various entry points to common routines of
+castlib4 python package.
 """
 
-import sys, argparse
+import sys, argparse, yaml
 import castlib4.models.filesystem as fs
-import castlib4.backend as be
+import castlib4.backend.local as lbe
+import castlib4.executives
 
 import json  # XXX
 
 if "__main__" == __name__:
-    lbe = be.LocalBackend()
-    entries = lbe.ls_detailed( sys.argv[1]
+    p = argparse.ArgumentParser(description=globals().__doc__)
+    p.add_argument('-c', '--config', help='YAML config file used.'
+                  , default='config.yaml')
+    #p.add_argument('-l', '--location', help='')
+    # ...
+    args = p.parse_args()
+    # Load config file:
+    with open(args.config) as cf:
+        cfg = yaml.load(cf, Loader=yaml.FullLoader)
+    # Initialize database:
+    castlib4.executives.initialize_database( cfg['database']['args']
+                                           , engineCreateKWargs=cfg['database']['kwargs'])
+    # -------------------------------------------------------------------------
+    # Testing code: uses content of $(pwd)/castlib4/ to create a files index.
+    lbe = lbe.LocalBackend()
+    entries = lbe.ls_detailed( 'castlib4'
                              , recursive=True
                              , filePropertiesExclude=['adler32']
                              , omitEmptyDirs=True
                              , pattern='.*.py$' )
-    #print( json.dumps( entries, indent=2) )
+    # Uncomment to see a JSON dump
+    #print( json.dumps( entries, indent=4) )
     #print( lbe.adler32(sys.argv[1]) )
 
 

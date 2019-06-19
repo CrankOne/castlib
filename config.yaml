@@ -2,11 +2,15 @@
 # Node below describes various locations that is supposed to be under control
 # of castlib.
 nodes:
+    # CASTOR endpoint: synchronization destination, primary data storage for
+    # NA58 and NA64 experiments.
     na64-data-castor:
         role: endpoint
         backend:
             type: CASTOR
-            path: /castor/cern.ch/na64/data/cdr
+            paths: 
+                - uri: root://castorpublic.cern.ch://castor/cern.ch/na64/data/cdr
+                  invariant: na64
             mask: '*.dat'
             #user: 'p348data'
             #group: 'p348data'
@@ -23,9 +27,28 @@ nodes:
                 xrdcp:
                     exec: /usr/bin/xrdcp
                     # template: ... ?
+    # NFS share mounted from NA64's pcdmfs01 node somewhere on the local host
+    na64-nfs-share:
+        role: enpoint
+        backend:
+            type: local
+            paths:
+                - uri: file:///data/cdr
+                  invariant: na64
+    # Local cache for temporary storaging
     local-cache:
         role: cache
         backend:
             type: local
-            path: /eos/home-r/rdusaev/cstl4.cache
+            paths:
+                - uri: file:///eos/home-r/rdusaev/cstl4.cache
+                  invariant: cache
+
+# Queue options
+#  ...
+
+# Database options
+database:
+    args: ['sqlite:///castlib4.sqlite']  # Use 'sqlite://' for in-memory storaging
+    kwargs: {}
 
