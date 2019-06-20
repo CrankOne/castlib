@@ -26,10 +26,7 @@ castlib4 python package.
 
 import sys, argparse, yaml
 import castlib4.models.filesystem as fs
-import castlib4.backend.local as lbe
 import castlib4.executives
-
-import json  # XXX
 
 if "__main__" == __name__:
     p = argparse.ArgumentParser(description=globals().__doc__)
@@ -38,22 +35,8 @@ if "__main__" == __name__:
     #p.add_argument('-l', '--location', help='')
     # ...
     args = p.parse_args()
-    # Load config file:
+    # Load config file and init castlib
     with open(args.config) as cf:
         cfg = yaml.load(cf, Loader=yaml.FullLoader)
-    # Initialize database:
-    castlib4.executives.initialize_database( cfg['database']['args']
-                                           , engineCreateKWargs=cfg['database']['kwargs'])
-    # -------------------------------------------------------------------------
-    # Testing code: uses content of $(pwd)/castlib4/ to create a files index.
-    lbe = lbe.LocalBackend()
-    entries = lbe.ls_detailed( 'castlib4'
-                             , recursive=True
-                             , filePropertiesExclude=['adler32']
-                             , omitEmptyDirs=True
-                             , pattern='.*.py$' )
-    # Uncomment to see a JSON dump
-    #print( json.dumps( entries, indent=4) )
-    #print( lbe.adler32(sys.argv[1]) )
-
+    castlib4.executives.init_all(cfg)
 

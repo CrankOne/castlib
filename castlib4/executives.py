@@ -25,8 +25,8 @@ from __future__ import print_function
 Various auxilliary subroutines ususally used by executable code.
 """
 
-import os
-from castlib4.logs import gLogger
+import os, logging
+import castlib4
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
@@ -54,4 +54,20 @@ def initialize_database( engineCreateArgs,
     DB.set_engine(engine)
     DB.set_session(dbS)
     DeclBase.metadata.create_all(engine)
+
+def initialize_backends( backendsCfg ):
+    if 'local' in backendsCfg.keys():
+        import castlib4.backend.local
+        castlib4.backend.registry.register_backend( 'file'
+                , castlib4.backend.local.LocalBackend( backendsCfg['local'] ) )
+    # else if ...
+
+def init_all( cfg ):
+    # Initialize database
+    initialize_database( cfg['database']['args']
+                                           , engineCreateKWargs=cfg['database']['kwargs'])
+    # Import backends
+    initialize_backends( cfg['backends'] )
+    # Configure celery app
+    castlib4.queue.conf.update(cfg['queue'])
 

@@ -1,0 +1,41 @@
+term screen-256color
+attrcolor b ".I"
+defutf8 on 
+# Clears the buffer after exiting man, vim, etc.
+altscreen on
+# Binds (<ctrl>+a, +/-) for shrinking the windows
+bind + resize +3
+bind - resize -1
+# Bind the cursor keys for navigation
+# ctrlA then right-arrow-key jumps active cursor one pane to the right:
+bindkey "^A^[OC" focus right
+
+# ctrlA then left-arrow-key jumps active cursor one pane to the left:
+bindkey "^A^[OD" focus left
+
+# ctrlA then up-arrow-key jumps active cursor one pane above current:
+bindkey "^A^[OA" focus up
+
+# ctrlA then up-arrow-key jumps active cursor one pane below current:
+bindkey "^A^[OB" focus down
+
+
+autorefresh on
+
+hardstatus alwayslastline "%=%H | %l | %c"
+
+caption top always ' %{-b dd}%-w%{cd}%n* %t%{-}%+w %{cd}%-=(%l) %d/%m %c%{-} '
+caption Something
+screen
+
+split
+focus
+screen 
+
+split
+focus
+screen
+
+split
+focus
+screen

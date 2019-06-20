@@ -19,18 +19,16 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import sys
+from __future__ import print_function
 
-from .logs import gLogger
+__version__ = '0.4.0'
 
-from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
+import sys, logging
+
+from celery import Celery
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
-from sqlalchemy.sql.expression import ClauseElement
-
 from castlib4.models import DeclBase
-
-from sqlalchemy.interfaces import PoolListener
 
 def _initialize_database( engineCreateArgs,
                           engineCreateKWargs={'echo' : True} ):
@@ -64,9 +62,10 @@ class _DatabaseShim(object):
         raise AttributeError("Class %s has no attribute \"%s\"."%(self.__class__, key))
 
     def get_session(self):
+        L = logging.getLogger(__name__)
         if self._session is None:
-            gLogger.debug( "No extra configuration provided for database. Initializing " \
-                "instance with default parameters." )
+            L.debug( "No extra configuration provided for database."
+                    " Initializing instance with default parameters." )
             self._engine, self._session = _initialize_database(
                         ["sqlite:///castlib4-database.sqlite"],
                         engineCreateKWargs={
@@ -97,5 +96,6 @@ class _DatabaseShim(object):
             session.commit()
             return instance, True
 
+setattr( sys.modules[__name__], 'queue', Celery('cstl4') )
 setattr( sys.modules[__name__], 'dbShim', _DatabaseShim() )
 

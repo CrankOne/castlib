@@ -28,3 +28,4 @@ CMakeFiles
 castlib3.egg-info/*
 venv/*
 .venv/*
+*.sqlite

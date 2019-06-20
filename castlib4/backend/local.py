@@ -28,6 +28,12 @@ class LocalBackend(DetailedList):
     One may consider this implementation as a kind of explicit contract or
     an "implemented interface", the boilerplate claiming of how all other
     back-ends must behave.
+
+    TODO: for testing purposes we inherited the `DetailedList' mixing here that
+    implements recursive traversal based on a subsed of back-end methods.
+    Concerning the local filesystem this approach potentially is not the most
+    efficient way in Python. Consider implementation with default Python's
+    `os.walk()' method to gain more performance...
     """
 
     def __init__(self, a32blockSize=65536):
@@ -98,4 +104,3 @@ class LocalBackend(DetailedList):
 
     def mkdir(self, path):
         raise NotImplementedError()  # TODO
-

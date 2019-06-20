@@ -21,58 +21,46 @@
 
 from __future__ import print_function
 
-"""
-File containing logging configuration for castlib2.
-"""
+import os, logging, logging.config, yaml
 
-import logging, os, threading
-from collections import deque
+gIsSetUp = False
+gColoredPrfxs = {
+        logging.CRITICAL : "\033[1;41;33m\u2592E\033[0m",
+        logging.ERROR    : "\033[2;41;32m\u2591e\033[0m",
+        logging.WARNING  : "\033[1;43;31m\u2591w\033[0m",
+        logging.INFO     : "\033[1;44;37m\u2591i\033[0m",
+        logging.DEBUG    : "\033[2;40;36m\u2591D\033[0m",
+        logging.NOTSET   : "\033[31;2;11m\u2591?\033[0m"
+    }
 
-class MemorizingHandler(logging.Handler):
-    def __init__(self, *args, **kwargs):
-        n = kwargs.pop('nMaxMessages', 10)
-        self.memo = deque( n*[None], n )
-        self.lock = threading.RLock()
-        logging.Handler.__init__(self)
+class ConsoleColoredFormatter(logging.Formatter):
+    def format( self, record ):
+        m = super(ConsoleColoredFormatter, self).format(record)
+        m = gColoredPrfxs[record.levelno] + ' ' + m
+        return m
 
-    def emit(self, record):
-        msg = self.format( record )
-        with self.lock:
-            self.memo.appendleft( msg )
-
-    def get_records(self):
-        rs = []
-        with self.lock:
-            rs = list([ r for r in self.memo ])
-        return filter( lambda r: r, rs )
-
-# create logger
-gLogger = logging.getLogger('CastLib3')
-gLogger.setLevel( logging.DEBUG )
-
-# create console handler and set level to debug
-sh = logging.StreamHandler()
-dbgOn = True if 'DEBUG' in os.environ.keys() and int(os.environ['DEBUG']) else False
-if dbgOn:
-    sh.setLevel( logging.DEBUG )
-else:
-    sh.setLevel( logging.INFO )
-formatter = logging.Formatter('%(name)s/%(levelname)s: %(message)s')
-sh.setFormatter(formatter)
-
-ch = logging.FileHandler('/tmp/castlib.log' )
-ch.setLevel( logging.INFO )
-
-# create formatter
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-ch.setFormatter(formatter)
-
-# memorizing handler
-mh = MemorizingHandler()
-mh.setLevel( logging.DEBUG if dbgOn else logging.INFO )
-
-gLogger.addHandler(ch)
-gLogger.addHandler(mh)
-gLogger.info('*** New castlib4 session started ***')
-gLogger.addHandler(sh)
+def setup( defaultPath='logging.yaml'
+         , defaultLevel=logging.DEBUG
+         , envKey='CASTLIB4_LOG_CFG' ):
+    """
+    Setup logging configuration.
+    Note, that for `root' logger the level will be set to DEBUG once the global
+    shell variable is set.
+    """
+    global gIsSetUp
+    if gIsSetUp:
+        return
+    path = defaultPath
+    value = os.getenv(envKey, None)
+    if value:
+        path = value
+    if os.path.exists(path):
+        with open(path, 'rt') as f:
+            config = yaml.safe_load(f.read())
+        if os.getenv('DEBUG', None):
+            config['root']['level'] = 'DEBUG'
+        logging.config.dictConfig(config)
+    else:
+        logging.basicConfig(level=defaultLevel)
+    gIsSetUp = True
 

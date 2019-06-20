@@ -21,14 +21,13 @@
 
 from __future__ import print_function
 
-import os
+import os, logging
 
 from sqlalchemy import Column, ForeignKey, String, Integer, DateTime
 from sqlalchemy.orm import relationship, Session
 from sqlalchemy.orm.collections import attribute_mapped_collection
 
 from castlib4.models import DeclBase
-from castlib4.logs import gLogger
 
 #from urlparse import urlunsplit
 # See for neat example of recursive adjacency list:
@@ -40,6 +39,7 @@ FS_PI_FOLDER = 2
 
 class UpdatingMixin(object):
     def update_fields(self, **kwargs):
+        L = logging.getLogger(__name__)
         updated = False
         mappings = kwargs.pop('_attrMappings', None)
         for k, v in kwargs.iteritems():
@@ -52,7 +52,8 @@ class UpdatingMixin(object):
                     try:
                         tv = type(av)(tv)
                     except TypeError:
-                        gLogger.error( 'Expected type: %s, given: %s.'%( type(av), type(tv) ) )
+                        L.error( 'Expected type: %s, given:'
+                                 ' %s.'%( type(av), type(tv) ) )
                         raise
             if av != tv:
                 setattr(self, k, v)

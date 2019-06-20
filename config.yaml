@@ -2,6 +2,14 @@
 # Node below describes various locations that is supposed to be under control
 # of castlib.
 nodes:
+    # Current directory considered as an endpoint (XXX, for testing purposes)
+    pwd:
+        role: endpoint
+        backend:
+            type: local
+            paths:
+                - uri: file://.
+                  invariant: distribution
     # CASTOR endpoint: synchronization destination, primary data storage for
     # NA58 and NA64 experiments.
     na64-data-castor:
@@ -44,8 +52,13 @@ nodes:
                 - uri: file:///eos/home-r/rdusaev/cstl4.cache
                   invariant: cache
 
-# Queue options
-#  ...
+backends:
+    local: {}
+
+# Queue options (structurally a cerely configuration)
+queue:
+    # fmt: redis://:password@hostname:port/db_number
+    broker_url: 'redis://localhost:6379/0'
 
 # Database options
 database:
