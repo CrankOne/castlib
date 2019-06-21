@@ -1,9 +1,9 @@
 futures==3.0.3
 six>=1.9.0
 sqlalchemy
-pyyaml
+PyYMAL
 beautifulsoup4
 sqlamp
 progress
 dpath
-#psycopg2
+schema

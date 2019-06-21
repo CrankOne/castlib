@@ -1,4 +1,4 @@
-
+---
 # Node below describes various locations that is supposed to be under control
 # of castlib.
 nodes:
@@ -65,3 +65,57 @@ database:
     args: ['sqlite:///castlib4.sqlite']  # Use 'sqlite://' for in-memory storaging
     kwargs: {}
 
+logging:
+    version: 1
+    disable_existing_loggers: False
+    formatters:
+        simple:
+            format: "%(asctime)s,%(name)s::%(levelname)s: %(message)s"
+        condensed:
+            format: "\e[1m%(levelname)15s\e[0m: %(message)s"
+    handlers:
+        console:
+            class: logging.StreamHandler
+            level: INFO
+            formatter: condensed
+            stream: ext://sys.stdout
+
+        info_file_handler:
+            class: logging.handlers.RotatingFileHandler
+            level: INFO
+            formatter: simple
+            filename: logs/info.log
+            maxBytes: 10485760 # 10MB
+            backupCount: 20
+            encoding: utf8
+
+        error_file_handler:
+            class: logging.handlers.RotatingFileHandler
+            level: ERROR
+            formatter: simple
+            filename: logs/errors.log
+            maxBytes: 10485760 # 10MB
+            backupCount: 20
+            encoding: utf8
+
+        debug_file_handler:
+            class: logging.handlers.RotatingFileHandler
+            level: DEBUG
+            formatter: simple
+            filename: logs/debug.log
+            maxBytes: 10485760 # 10MB
+            backupCount: 20
+            encoding: utf8
+    loggers:
+        __main__:
+            level: DEBUG
+            handlers: [console, info_file_handler, error_file_handler, debug_file_handler]
+            propagate: no
+        castlib4:
+            level: DEBUG
+            handlers: [console, info_file_handler, error_file_handler, debug_file_handler]
+            propagate: no
+    root:
+        level: INFO
+        handlers: [console, info_file_handler, error_file_handler]
+...

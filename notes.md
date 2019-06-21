@@ -55,3 +55,32 @@ be identified by a path (literally, e.g., `/some/where`).
 In more complicated cases (remote location, reachable by some protocol like
 SSH or CASTOR), node credentials may be more complicated.
 
+# RESTful API drafts
+
+* The `/data/events` provides experiment-specific customized interface for
+per-event retrieval.
+* The `/data/files` provides direct, filesystem-like listings representing data
+arranged "invariant path":
+
+    GET => http://somehost.cern.ch/data/na64
+    <= {
+        "cdr11011-1988.dat" : {
+            ...
+        },
+        ...
+    }
+
+    GET => http://somehost.cern.ch/data/na64/cdr11011-1988.dat
+    <= ... the cdr11011-1988.dat file as is ...
+
+* The `/api4/tasks` represents an interface to task queue, with
+list/create/deny/status lifecycle:
+    1. `GET => /api4/task` returns list of queued tasks
+    2. `GET => /api4/task/<taskID>` returns the status of task identified
+by `taskID`
+    3. `POST => /api4/task` tries to push new task to queue returning its ID
+    4. `DELETE => /api4/task/<taskID>` tries to remove the task from the queue
+or abort currently running.
+
+This tasks are actually a Celery tasks.
+

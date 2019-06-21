@@ -81,7 +81,7 @@ def ls_detailed_f( be, path, recursive=False
         or ( not de \
              and omitEmptyDirs ):
             continue
-        ec['content'] = de
+        ec['@content'] = de
         entries[d] = ec
     return entries
 

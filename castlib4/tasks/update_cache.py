@@ -22,9 +22,12 @@
 from __future__ import print_function
 
 import os, urllib, logging
+from castlib4 import dbShim as DB
 import castlib4.backend \
      , castlib4.executives \
-     , castlib4.backend.mixins
+     , castlib4.backend.mixins \
+     , castlib4.schemata
+from castlib4.models.filesystem import Node, RootFolder, FSMappings
 
 import yaml, json  # XXX
 
@@ -42,6 +45,7 @@ def update_cache( uri
     """
     L = logging.getLogger(__name__)
     parsedURI = urllib.parse.urlparse( uri )
+    dirName = parsedURI.path.split( parsedURI.path )[1] or '/'
     be = castlib4.backend.registry.get_backend( parsedURI.scheme )
     lsdKWargs = { 'recursive' : recursive
                 , 'filePropertiesExclude' : filePropertiesExclude
@@ -61,8 +65,26 @@ def update_cache( uri
     else:
         # Use default implementation of detailed listings
         entries = castlib4.backend.mixins.ls_detailed( **lsdKWargs )
-    # TODO: update cache ...
-    print( json.dumps( entries, indent=4) ) # XXX
+    entries = castlib4.schemata.validate_fs_entries(entries)
+    #print(json.dumps( entries, indent=4, default=str, sort_keys=True )) # XXX
+    # Get the node and corresponding base folder in it
+    node, nodeCreated = DB.get_or_create( Node
+                                        , identifier=parsedURI.netloc )
+    if nodeCreated:
+        DB.session.add(node)
+    root, rootCreated = DB.get_or_create( RootFolder
+                                        , name=dirName
+                                        , node=node
+                                        , path=parsedURI.path )
+    if rootCreated:
+        DB.session.add(root)
+    if rootCreated or nodeCreated:
+        DB.session.flush()
+
+    root.sync_substruct( entries
+                       , recursive=recursive
+                       , _transformAttributes=FSMappings(node) )
+    print(json.dumps( root.as_dict(recursive=True), indent=4, default=str, sort_keys=True )) # XXX
 
 
 if "__main__" == __name__:

@@ -39,7 +39,7 @@ class ConsoleColoredFormatter(logging.Formatter):
         m = gColoredPrfxs[record.levelno] + ' ' + m
         return m
 
-def setup( defaultPath='logging.yaml'
+def setup( defaultPath='config.yaml'
          , defaultLevel=logging.DEBUG
          , envKey='CASTLIB4_LOG_CFG' ):
     """
@@ -58,8 +58,8 @@ def setup( defaultPath='logging.yaml'
         with open(path, 'rt') as f:
             config = yaml.safe_load(f.read())
         if os.getenv('DEBUG', None):
-            config['root']['level'] = 'DEBUG'
-        logging.config.dictConfig(config)
+            config['logging']['root']['level'] = 'DEBUG'
+        logging.config.dictConfig(config['logging'])
     else:
         logging.basicConfig(level=defaultLevel)
     gIsSetUp = True
